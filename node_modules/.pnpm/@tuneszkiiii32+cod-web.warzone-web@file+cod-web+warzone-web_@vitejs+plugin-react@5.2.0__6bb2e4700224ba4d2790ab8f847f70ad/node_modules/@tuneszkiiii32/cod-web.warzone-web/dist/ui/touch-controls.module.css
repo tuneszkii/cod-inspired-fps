@@ -1,0 +1,109 @@
+.root {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  font-family: 'Rajdhani', 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+}
+.stickZone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 45%;
+  height: 65%;
+  touch-action: none;
+}
+.stickBase {
+  position: fixed;
+  left: 110px;
+  bottom: auto;
+  top: calc(100% - 130px);
+  width: 112px;
+  height: 112px;
+  margin: -56px 0 0 -56px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.25);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.stickKnob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  transform: translate(-50%, -50%);
+}
+.lookZone {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 55%;
+  height: 100%;
+  touch-action: none;
+}
+.pause {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(56px);
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+  color: #f2f2ec;
+  font-size: 14px;
+}
+.actions {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+}
+.btn {
+  position: absolute;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: #f2f2ec;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  touch-action: none;
+  padding: 0;
+}
+.btn:active {
+  background: rgba(159, 176, 122, 0.6);
+}
+.fire { width: 76px; height: 76px; right: 28px; bottom: 150px; background: rgba(160, 30, 30, 0.45); font-size: 15px; }
+.ads { right: 118px; bottom: 190px; }
+.jump { right: 28px; bottom: 64px; }
+.crouch { right: 96px; bottom: 96px; font-size: 11px; }
+.reload { right: 120px; bottom: 30px; }
+.swap { right: 180px; bottom: 120px; font-size: 18px; }
+.frag { right: 40px; bottom: 246px; }
+.plate { right: 186px; bottom: 50px; font-size: 18px; }
+.knife { right: 250px; bottom: 120px; font-size: 11px; }
+.melee { right: 240px; bottom: 190px; font-size: 11px; }
+.streak { right: 250px; bottom: 190px; width: 60px; height: 60px; font-size: 11px; border-color: rgba(79, 216, 255, 0.85); background: rgba(20, 80, 100, 0.55); }
+.pick { right: 200px; bottom: 210px; width: 64px; height: 64px; font-size: 12px; border-color: rgba(255, 211, 107, 0.8); background: rgba(120, 90, 20, 0.5); }
+.btn.active {
+  background: rgba(159, 176, 122, 0.7);
+  border-color: rgba(220, 235, 180, 0.9);
+  box-shadow: 0 0 12px rgba(159, 176, 122, 0.6);
+}
+
+@media (min-width: 768px) {
+  .btn { width: 60px; height: 60px; }
+  .fire { width: 88px; height: 88px; }
+}

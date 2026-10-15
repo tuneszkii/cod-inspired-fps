@@ -1,0 +1,1528 @@
+import * as THREE from 'three';
+import {
+  ArmorCfg, CameraCfg, FlashCfg, FragCfg, HealthCfg, KnifeCfg, QuickMeleeCfg, QuickMeleeStrike, ScoreTags, ScoringCfg, Weapons, damageAt,
+  isPrimary, type GameSettings, type Loadout, type MeleeStrikeCfg, type PerkId, type WeaponCfg,
+} from './config.js';
+import { Input, isTouchDevice } from './input.js';
+import { Movement } from './movement.js';
+import { Spring, smooth } from './spring.js';
+import { Viewmodel, type TrackKind } from './viewmodel.js';
+import { World } from './world.js';
+import { findMap } from './maps/index.js';
+import { Effects } from './effects.js';
+import { Audio } from './audio.js';
+import { Bot, botDamage } from './bot.js';
+import { projectileMesh, stepProjectile, type Projectile } from './projectiles.js';
+import { Loot, type LootDrop } from './loot.js';
+import type { HudState, KillFeedEntry, ScorePopup } from './hud-state.js';
+import { Camos, DefaultCosmetics, Operators, findCosmetic, type Cosmetics } from './cosmetics.js';
+import { DefaultGraphics, ShadowMapSize, type GraphicsSettings } from './graphics.js';
+import { KillstreakWeapons, Killstreaks, MaxHeldStreaks, UavDuration, killstreakAt, nextKillstreak, type KillstreakCfg, type KillstreakId } from './killstreaks.js';
+
+/** Per-slot runtime weapon state. */
+interface WeaponSlot {
+  cfg: WeaponCfg;
+  mag: number;
+  reserve: number;
+}
+
+const PLAYER_ID = -1;
+const PLAYER_NAME = 'You';
+/** How far away (studs) a melee swing will pull you toward an enemy in front of you. */
+const MELEE_LUNGE_RANGE = 14;
+/** Forward speed (studs/s) added to the player when a melee swing lunges. */
+const MELEE_LUNGE_SPEED = 38;
+/** Walk-over radius for ammo / plate pickups. */
+const AUTO_PICKUP_RADIUS = 3;
+/** Radius in which a dropped weapon can be swapped for (E / PICK button). */
+const WEAPON_PICKUP_RADIUS = 4;
+
+/**
+ * The whole game: world, player controller (movement + camera + weapons), bots, scoring and rendering.
+ * React owns only the canvas and HUD; this class runs the loop.
+ */
+export class Game {
+  private renderer: THREE.WebGLRenderer;
+  private scene = new THREE.Scene();
+  private camera: THREE.PerspectiveCamera;
+  private world: World;
+  private input: Input;
+  private mv: Movement;
+  private vm = new Viewmodel();
+  private fx: Effects;
+  private audio: Audio;
+  private bots: Bot[] = [];
+  private projectiles: Projectile[] = [];
+  private loot: Loot;
+  /** Alive state of each bot last frame, used to detect deaths and drop their loot. */
+  private botWasAlive = new Map<Bot, boolean>();
+  /** Weapon drop currently in reach (shown as a prompt). */
+  private nearWeapon: LootDrop | null = null;
+  private lootToast: { text: string; at: number } | null = null;
+  private raf = 0;
+  private last = 0;
+  private now = 0;
+  private running = false;
+  private settings: GameSettings;
+
+  // camera rig
+  private yaw = 0;
+  private pitch = 0;
+  private recoil = new THREE.Vector2();
+  private recoilTarget = new THREE.Vector2();
+  private lastShot = -99;
+  private shake = new Spring(16, 0.5);
+  private roll = 0;
+  private bobT = 0;
+  private fov = 80;
+
+  // weapons
+  /** 0 = primary, 1 = secondary, 2 = knife. */
+  private slots: [WeaponSlot, WeaponSlot, WeaponSlot];
+  private slot: 0 | 1 | 2 = 0;
+  private ads = 0;
+  private adsEased = 0;
+  private bloom = 0;
+  private shotIndex = 0;
+  private nextFire = 0;
+  private busyUntil = 0; // equip / melee / throw
+  /** Equipped perks. */
+  private perks: Set<PerkId>;
+  /** Next time the Restock perk refills equipment. */
+  private restockAt = 0;
+  /** Earliest time the player can knife again. */
+  private meleeReadyAt = 0;
+  private reloading: null | { style: string; endAt: number; stage?: 'start' | 'shell' | 'end'; stageEnd?: number } = null;
+  private cycleUntil = 0;
+  private sprintOutUntil = 0;
+  private wasSprinting = false;
+  private triggerHeld = false;
+  private holdingBreath = false;
+  private breath = 4.5;
+
+  // equipment / plates
+  private frags = FragCfg.count;
+  private flashes = FlashCfg.count;
+  private cookStart = 0;
+  private cooking: null | 'Frag' | 'Flash' = null;
+  private plates = ArmorCfg.startCarried;
+  private plating: null | { start: number; end: number } = null;
+
+  // vitals
+  private health = HealthCfg.max;
+  private armor = ArmorCfg.startArmor;
+  private lastHurt = -99;
+  private dead = false;
+  private respawnAt = 0;
+  private killedBy = '';
+  private flashAmt = 0;
+  private hurtAmt = 0;
+  private damageDirs: { angle: number; age: number; from: THREE.Vector3 }[] = [];
+
+  // score
+  private kills = 0;
+  private deaths = 0;
+  private streak = 0;
+  /** Earned killstreak rewards waiting to be activated (oldest first). */
+  private held: KillstreakId[] = [];
+  /** Time (seconds) until which the UAV keeps every hostile on the radar. */
+  private uavUntil = 0;
+  /** Delayed callbacks for airstrike bombs and mortar shells. */
+  private scheduled: { at: number; run: () => void }[] = [];
+  private xp = 0;
+  private multi = 0;
+  private lastKillAt = -99;
+  private firstBlood = false;
+  private lastKiller: number | null = null;
+  private killFeed: (KillFeedEntry & { at: number })[] = [];
+  private popups: (ScorePopup & { at: number })[] = [];
+  private medal: (ScorePopup & { at: number }) | null = null;
+  private medalQueue: ScorePopup[] = [];
+  private uid = 0;
+  private hitAt = -99;
+  private hitKill = false;
+  private hitHead = false;
+
+  private hudTimer = 0;
+  private fpsAcc = 0;
+  private fpsFrames = 0;
+  private fps = 60;
+  private sun: THREE.DirectionalLight;
+  private sunOffset = new THREE.Vector3(80, 140, 50);
+  private sunCenter = new THREE.Vector3();
+  private fog: THREE.Fog;
+  /** Last applied graphics options, used to only redo the expensive parts when they change. */
+  private gfx: GraphicsSettings | null = null;
+
+  /**
+   * @param container element that hosts the canvas
+   * @param loadout chosen loadout
+   * @param settings user settings
+   * @param onHud HUD snapshot callback
+   * @param onPause called when pointer lock is lost
+   * @param cosmetics visual-only operator skin and weapon camo
+   */
+  constructor(
+    private container: HTMLElement,
+    loadout: Loadout,
+    settings: GameSettings,
+    private onHud: (s: HudState) => void,
+    private onPause: (paused: boolean) => void,
+    cosmetics: Cosmetics = DefaultCosmetics
+  ) {
+    this.settings = settings;
+    this.vm.setCosmetics(findCosmetic(Operators, cosmetics.operator), findCosmetic(Camos, cosmetics.camo));
+    const touch = isTouchDevice();
+    const gfx = settings.graphics ?? DefaultGraphics;
+    this.renderer = new THREE.WebGLRenderer({ antialias: gfx.antialias, powerPreference: 'high-performance' });
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.autoClear = false;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    container.appendChild(this.renderer.domElement);
+    this.renderer.domElement.style.display = 'block';
+
+    const map = findMap(settings.mapId);
+    const atm = map.atmosphere;
+    this.camera = new THREE.PerspectiveCamera(80, 1, 0.1, 1600);
+    this.camera.rotation.order = 'YXZ';
+    this.scene.background = new THREE.Color(atm.sky);
+    this.fog = new THREE.Fog(atm.sky, 120, 420);
+    this.scene.fog = this.fog;
+    const hemi = new THREE.HemisphereLight(atm.hemiSky, atm.hemiGround, atm.hemiIntensity);
+    this.scene.add(hemi);
+    const sun = new THREE.DirectionalLight(atm.sunColor, atm.sunIntensity);
+    this.sunOffset.set(...atm.sunDir).normalize().multiplyScalar(220);
+    sun.position.copy(this.sunOffset);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    // shadow frustum follows the player (see frame) so shadows stay crisp on huge maps
+    const sc = sun.shadow.camera;
+    sc.left = -130;
+    sc.right = 130;
+    sc.top = 130;
+    sc.bottom = -130;
+    sc.far = 520;
+    sun.shadow.bias = -0.0005;
+    this.scene.add(sun);
+    this.scene.add(sun.target);
+    this.sun = sun;
+
+    this.world = new World(this.scene, map);
+    this.fx = new Effects(this.scene);
+    this.loot = new Loot(this.scene);
+    this.audio = new Audio(settings.volume);
+    if (new URLSearchParams(window.location.search).has('debug')) (window as unknown as { __game: Game }).__game = this;
+    this.input = new Input(this.renderer.domElement, (active) => {
+      if (active) this.audio.resume();
+      this.onPause(!active);
+    });
+    this.mv = new Movement(this.world);
+    this.mv.onLand = (s) => {
+      this.vm.land(s);
+      this.shake.impulse(new THREE.Vector3(-Math.min(s * 0.004, 0.12), 0, 0));
+    };
+    this.mv.onSlide = () => {
+      this.vm.slideKick();
+      this.audio.slide();
+    };
+
+    this.perks = new Set(loadout.perks ?? []);
+    // a primary in the secondary slot is only allowed with Overkill
+    const secondary = isPrimary(loadout.secondary) && !this.perks.has('Overkill') ? 'M1911' : loadout.secondary;
+    this.slots = [this.makeSlot(loadout.primary), this.makeSlot(secondary), this.makeSlot('Knife')];
+    for (let i = 0; i < settings.botCount; i++) this.bots.push(new Bot(i, this.scene));
+
+    this.onResize = this.onResize.bind(this);
+    window.addEventListener('resize', this.onResize);
+    this.applyGraphics(gfx);
+    this.onResize();
+    this.spawnPlayer();
+    this.bots.forEach((b) => b.spawn(this.pickSpawn(), 0));
+  }
+
+  private makeSlot(name: string): WeaponSlot {
+    const cfg = Weapons[name];
+    return { cfg, mag: cfg.mag, reserve: cfg.reserve };
+  }
+
+  private get cur() {
+    return this.slots[this.slot];
+  }
+
+  /** Input state, used by on-screen touch controls. */
+  get controls(): Input {
+    return this.input;
+  }
+
+  /** Starts the loop and activates input (requests pointer lock on desktop). */
+  start() {
+    this.running = true;
+    this.last = performance.now();
+    this.audio.resume();
+    this.input.lock();
+    const loop = (t: number) => {
+      this.raf = requestAnimationFrame(loop);
+      const cap = this.settings.graphics?.fpsCap ?? 0;
+      // 1ms slack so a 60 cap on a 60Hz display does not skip every other frame
+      if (cap > 0 && t - this.last < 1000 / cap - 1) return;
+      const dt = Math.min((t - this.last) / 1000, 1 / 20);
+      this.last = t;
+      this.frame(dt);
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  /** Resumes input after a pause (re-locks the pointer on desktop). */
+  resume() {
+    this.audio.resume();
+    this.input.lock();
+  }
+
+  /** Pauses input (used by the on-screen pause button on touch devices). */
+  pause() {
+    this.input.pause();
+  }
+
+  /**
+   * Applies new settings at runtime.
+   * @param s settings
+   */
+  applySettings(s: GameSettings) {
+    this.settings = s;
+    this.audio.setVolume(s.volume);
+    this.applyGraphics(s.graphics ?? DefaultGraphics);
+  }
+
+  /**
+   * Applies graphics options live: render scale, shadow quality, view distance. Anti-aliasing is fixed
+   * at renderer creation so it takes effect on the next deploy.
+   * @param g graphics settings
+   */
+  private applyGraphics(g: GraphicsSettings) {
+    const prev = this.gfx;
+    this.gfx = g;
+    if (!prev || prev.renderScale !== g.renderScale) {
+      const touch = isTouchDevice();
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, touch ? 1.25 : 2) * g.renderScale);
+      if (prev) this.onResize();
+    }
+    if (!prev || prev.shadows !== g.shadows) {
+      const size = ShadowMapSize[g.shadows];
+      this.sun.castShadow = size > 0;
+      if (size > 0 && this.sun.shadow.mapSize.x !== size) {
+        this.sun.shadow.map?.dispose();
+        this.sun.shadow.map = null;
+        this.sun.shadow.mapSize.set(size, size);
+      }
+    }
+    if (!prev || prev.viewDistance !== g.viewDistance) {
+      this.fog.far = g.viewDistance;
+      this.fog.near = g.viewDistance * (this.world?.map.atmosphere.fogNear ?? 0.29);
+    }
+  }
+
+  /** Stops everything and frees GPU resources. */
+  dispose() {
+    this.running = false;
+    cancelAnimationFrame(this.raf);
+    window.removeEventListener('resize', this.onResize);
+    this.loot.clear();
+    this.input.dispose();
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
+  }
+
+  private onResize() {
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+    this.renderer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+    this.vm.resize(w / h);
+  }
+
+  private pickSpawn(): THREE.Vector3 {
+    // farthest-from-enemies spawn (with a bit of randomness)
+    const others: THREE.Vector3[] = this.bots.filter((b) => b.alive).map((b) => b.pos);
+    if (!this.dead) others.push(this.mv.pos);
+    let best = this.world.spawns[0];
+    let bestScore = -Infinity;
+    for (const s of this.world.spawns) {
+      const dmin = others.length ? Math.min(...others.map((o) => o.distanceTo(s))) : 100;
+      const score = dmin + Math.random() * 25;
+      if (score > bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    return best.clone();
+  }
+
+  private spawnPlayer() {
+    this.dead = false;
+    this.health = HealthCfg.max;
+    this.armor = ArmorCfg.startArmor;
+    this.plates = ArmorCfg.startCarried;
+    this.frags = this.maxFrags;
+    this.flashes = FlashCfg.count;
+    this.restockAt = this.now + 25;
+    this.slots.forEach((s) => {
+      s.mag = s.cfg.mag;
+      s.reserve = s.cfg.reserve;
+    });
+    this.streak = 0;
+    this.held = [];
+    this.slot = 0;
+    this.reloading = null;
+    this.plating = null;
+    this.cooking = null;
+    const p = this.pickSpawn();
+    this.mv.spawn(p);
+    this.yaw = Math.atan2(p.x, p.z); // face map center
+    this.pitch = 0;
+    this.recoil.set(0, 0);
+    this.recoilTarget.set(0, 0);
+    this.equip();
+  }
+
+  private get maxFrags() {
+    return FragCfg.count + (this.perks.has('Shrapnel') ? 1 : 0);
+  }
+
+  private equip() {
+    this.vm.setWeapon(this.cur.cfg);
+    this.busyUntil = this.now + this.cur.cfg.equipTime * (this.perks.has('Amped') ? 0.5 : 1);
+    this.reloading = null;
+    this.cycleUntil = 0;
+    this.shotIndex = 0;
+    this.bloom = 0;
+  }
+
+  // ------------------------------------------------------------------ frame
+  private frame(dt: number) {
+    if (!this.running) return;
+    this.now += dt;
+    const now = this.now;
+    const input = this.input;
+    const active = input.active;
+
+    this.fpsAcc += dt;
+    this.fpsFrames++;
+    if (this.fpsAcc > 0.5) {
+      this.fps = Math.round(this.fpsFrames / this.fpsAcc);
+      this.fpsAcc = 0;
+      this.fpsFrames = 0;
+    }
+
+    if (this.dead) {
+      if (now >= this.respawnAt) this.spawnPlayer();
+    } else if (active) {
+      this.updateWeapons(dt, now);
+    }
+
+    // movement (keeps running for physics even when paused-unlocked: input is empty)
+    if (!this.dead) {
+      const w = this.cur.cfg;
+      const speedMult = (w.moveMult + (w.adsMoveMult - w.moveMult) * this.adsEased) * (this.plating ? 0.85 : 1);
+      this.mv.update(dt, this.yaw, input, speedMult, now);
+      if (this.mv.isSprinting && !this.wasSprinting) this.reloadCancelForSprint();
+      if (!this.mv.isSprinting && this.wasSprinting) this.sprintOutUntil = now + w.sprintOutTime;
+      this.wasSprinting = this.mv.isSprinting;
+      // regen
+      if (now - this.lastHurt > HealthCfg.regenDelay) this.health = Math.min(HealthCfg.max, this.health + HealthCfg.regenRate * dt);
+    }
+
+    this.updateCamera(dt, now);
+    this.updateBots(dt, now);
+    this.updateProjectiles(dt, now);
+    this.runScheduled(now);
+    this.updateLoot(now);
+    this.fx.update(dt);
+
+    // viewmodel
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const wall = this.world.raycast(this.camera.position, fwd, 3.9);
+    const scoped = !!this.cur.cfg.scope && this.adsEased > 0.85;
+    this.vm.camera.fov = 62 - 14 * this.adsEased;
+    this.vm.camera.updateProjectionMatrix();
+    this.vm.update(dt, this.mv, this.adsEased, input.mouseDX, input.mouseDY, wall ? wall.dist : Infinity, scoped || this.dead, now, this.yaw);
+
+    // effects decay
+    this.flashAmt = Math.max(0, this.flashAmt - dt * 0.28);
+    this.hurtAmt = Math.max(0, this.hurtAmt - dt * 1.5);
+    this.damageDirs = this.damageDirs.filter((d) => (d.age += dt) < 1.6);
+
+    // render
+    this.renderer.clear();
+    // keep the shadow camera centered on the player, snapped to texels to avoid shimmering
+    const snap = 260 / this.sun.shadow.mapSize.x;
+    this.sunCenter.set(Math.round(this.camera.position.x / snap) * snap, 0, Math.round(this.camera.position.z / snap) * snap);
+    this.sun.target.position.copy(this.sunCenter);
+    this.sun.position.copy(this.sunCenter).add(this.sunOffset);
+    this.renderer.render(this.scene, this.camera);
+    this.renderer.clearDepth();
+    this.renderer.render(this.vm.scene, this.vm.camera);
+
+    this.hudTimer += dt;
+    if (this.hudTimer > 1 / 30) {
+      this.hudTimer = 0;
+      this.pushHud(scoped);
+    }
+    input.endFrame();
+  }
+
+  private reloadCancelForSprint() {
+    // MW lets you sprint-cancel shell reloads; mag reloads keep going but block firing
+    if (this.reloading && this.reloading.style === 'Shell') this.finishShellReload();
+  }
+
+  // ------------------------------------------------------------------ camera
+  private updateCamera(dt: number, now: number) {
+    const input = this.input;
+    const hip = this.settings.fov;
+    const w = this.cur.cfg;
+    const fovT = hip + (w.adsFov - hip) * this.adsEased + this.mv.alpha.sprint * CameraCfg.sprintFov + this.mv.alpha.tac * CameraCfg.tacFov;
+    this.fov = smooth(this.fov, fovT, 14, dt);
+
+    const zoom = Math.tan(THREE.MathUtils.degToRad(this.fov / 2)) / Math.tan(THREE.MathUtils.degToRad(hip / 2));
+    // blend hip and ADS multipliers by the ADS amount so aiming in/out never snaps the look speed;
+    // `zoom` still scales both down with the FOV, so 1.0 keeps the same feel across weapons
+    const userSens = THREE.MathUtils.lerp(this.settings.sensitivity, this.settings.adsSensitivity ?? this.settings.sensitivity, this.adsEased);
+    const sens = CameraCfg.sensitivity * userSens * zoom;
+    if (!this.dead) {
+      this.yaw -= input.mouseDX * sens;
+      this.pitch = THREE.MathUtils.clamp(this.pitch - input.mouseDY * sens, -1.5, 1.5);
+    }
+
+    if (now - this.lastShot > CameraCfg.recoilDelay) this.recoilTarget.multiplyScalar(Math.exp(-CameraCfg.recoilRecover * dt));
+    this.recoil.lerp(this.recoilTarget, 1 - Math.exp(-30 * dt));
+
+    const s = Math.sin(this.yaw);
+    const c = Math.cos(this.yaw);
+    const lx = this.mv.vel.x * c - this.mv.vel.z * s;
+    const rollT = -THREE.MathUtils.clamp(lx, -20, 20) * 0.0016 + this.mv.alpha.slide * THREE.MathUtils.degToRad(-3);
+    this.roll = smooth(this.roll, rollT, 8, dt);
+
+    const amp = this.mv.grounded ? THREE.MathUtils.clamp(this.mv.speed / 14, 0, 1.4) : 0;
+    this.bobT += dt * this.mv.speed * 0.55;
+    const adsK = 1 - 0.9 * this.adsEased;
+    const bobY = Math.sin(this.bobT * 2) * 0.03 * amp * adsK;
+    const bobRoll = Math.sin(this.bobT) * 0.004 * amp * adsK;
+    const sh = this.shake.update(dt);
+
+    let pitch = THREE.MathUtils.clamp(this.pitch + THREE.MathUtils.degToRad(this.recoil.x), -1.55, 1.55);
+    let yaw = this.yaw - THREE.MathUtils.degToRad(this.recoil.y);
+    if (w.scope && this.adsEased > 0.3) {
+      const a = this.holdingBreath ? 0.02 : CameraCfg.scopeSway;
+      pitch += THREE.MathUtils.degToRad(Math.cos(now * 1.9) * a * 0.8 * this.adsEased);
+      yaw += THREE.MathUtils.degToRad(Math.sin(now * 1.3) * a * this.adsEased);
+    }
+    if (this.dead) {
+      pitch = -0.6;
+    }
+    const eye = this.dead ? 1.2 : this.mv.eyeHeight + bobY;
+    this.camera.position.set(this.mv.pos.x, this.mv.pos.y + eye, this.mv.pos.z);
+    this.camera.rotation.set(pitch + sh.x, yaw + sh.y, sh.z + this.roll + bobRoll, 'YXZ');
+    this.camera.fov = this.fov;
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld();
+  }
+
+  // ------------------------------------------------------------------ weapons
+  private updateWeapons(dt: number, now: number) {
+    const input = this.input;
+    const slot = this.cur;
+    const w = slot.cfg;
+    const busy = now < this.busyUntil;
+
+    // Restock perk: recharge one lethal + one tactical periodically
+    if (this.perks.has('Restock') && now >= this.restockAt) {
+      this.restockAt = now + 25;
+      if (this.frags < this.maxFrags) this.frags++;
+      if (this.flashes < FlashCfg.count) this.flashes++;
+    }
+
+    // switch
+    let want: 0 | 1 | 2 | null = null;
+    if (input.wasPressed('Digit1')) want = 0;
+    if (input.wasPressed('Digit2')) want = 1;
+    if (input.wasPressed('Digit3')) want = 2;
+    if (input.wasPressed('KeyF') || input.wheel !== 0) want = this.slot === 0 ? 1 : 0;
+    if (want !== null && want !== this.slot && !this.plating && !this.cooking) {
+      this.slot = want;
+      this.vm.cancelGunAnim();
+      this.equip();
+      return;
+    }
+
+    // killstreak reward (T): uses the oldest earned one
+    if (input.wasPressed('KeyT')) this.useStreak(now);
+
+    // plates (X) — press again to cancel
+    if (input.wasPressed('KeyX')) {
+      if (this.plating) this.cancelPlate();
+      else if (this.plates > 0 && this.armor < ArmorCfg.plateArmor * ArmorCfg.maxEquipped && !busy) this.startPlate(now);
+    }
+    if (this.plating && now >= this.plating.end) this.finishPlate(now);
+
+    // ADS
+    const sprinting = this.mv.isSprinting;
+    const wantAds = input.isDown('Mouse2') && w.cls !== 'Melee' && !this.plating && !this.cooking && !(w.cycle?.dropAds && now < this.cycleUntil) && !(this.reloading && w.cls !== 'Shotgun');
+    if (wantAds && sprinting) this.mv.sprintBlocked = true;
+    else this.mv.sprintBlocked = !!this.plating;
+    this.ads = THREE.MathUtils.clamp(this.ads + (wantAds && !sprinting ? 1 : -1) * (dt / w.adsTime), 0, 1);
+    this.adsEased = this.ads * this.ads * (3 - 2 * this.ads);
+
+    // hold breath (Shift while scoped)
+    const scoped = !!w.scope && this.adsEased > 0.85;
+    this.holdingBreath = scoped && input.isDown('ShiftLeft') && this.breath > 0;
+    if (this.holdingBreath) this.breath = Math.max(0, this.breath - dt);
+    else this.breath = Math.min(4.5, this.breath + dt * 1.2);
+
+    // bloom recovery
+    this.bloom = Math.max(0, this.bloom - w.spread.recover * dt);
+    if (now - this.lastShot > w.recoil.reset) this.shotIndex = 0;
+
+    // reload
+    this.updateReload(now);
+    if (input.wasPressed('KeyR') && !this.reloading && slot.mag < w.mag && slot.reserve > 0 && !busy && !this.plating) this.startReload(now);
+
+    // equipment
+    if (!this.plating && !busy && !this.reloading) {
+      if (input.wasPressed('KeyG') && this.frags > 0) this.startCook('Frag', now);
+      if (input.wasPressed('KeyQ') && this.flashes > 0) this.startCook('Flash', now);
+    }
+    if (this.cooking) {
+      const key = this.cooking === 'Frag' ? 'KeyG' : 'KeyQ';
+      const cooked = now - this.cookStart;
+      if (this.cooking === 'Frag' && cooked >= FragCfg.fuse) {
+        // cooked too long — it goes off in your hand
+        this.throwEquipment(now, true);
+      } else if (!input.isDown(key) && cooked > 0.35) this.throwEquipment(now, false);
+    }
+
+    // quick melee
+    if (input.wasPressed('KeyV') && !busy && !this.plating && !this.cooking) this.quickMelee(now);
+
+    // knife: LMB = fast slash, RMB = slower lunging stab (no ammo, no ADS)
+    if (w.cls === 'Melee') {
+      const stab = input.isDown('Mouse2');
+      const slash = input.isDown('Mouse0');
+      if ((stab || slash) && !busy && !this.plating && !this.cooking) {
+        this.meleeStrike(now, stab ? KnifeCfg.stab : KnifeCfg.slash, stab ? 'Stab' : 'Slash');
+      }
+      this.triggerHeld = slash;
+      return;
+    }
+
+    // fire
+    const trigger = input.isDown('Mouse0');
+    const pressed = input.wasPressed('Mouse0');
+    if (pressed && this.reloading && this.reloading.style === 'Shell' && slot.mag > 0) this.finishShellReload();
+    const canFire =
+      !busy && !this.plating && !this.cooking && !this.reloading && now >= this.nextFire && now >= this.cycleUntil && now >= this.sprintOutUntil && !sprinting;
+    if (trigger && canFire) {
+      if (slot.mag <= 0) {
+        if (pressed) {
+          this.audio.click(0.6);
+          if (slot.reserve > 0) this.startReload(now);
+        }
+      } else if (w.fireMode === 'Auto' || !this.triggerHeld) {
+        this.fire(now);
+      }
+    }
+    if (trigger && sprinting && pressed) this.mv.sprintBlocked = true; // firing stops sprint
+    this.triggerHeld = trigger;
+  }
+
+  private startReload(now: number) {
+    const s = this.cur;
+    const w = s.cfg;
+    this.ads = Math.min(this.ads, w.cls === 'Shotgun' ? 1 : 0.0);
+    const rk = this.reloadMult;
+    if (w.reloadStyle === 'Shell') {
+      const t = (w.shellStart ?? 0.45) * rk;
+      this.reloading = { style: 'Shell', endAt: Infinity, stage: 'start', stageEnd: now + t };
+      this.vm.playGunAnim('Shell', t);
+    } else {
+      const empty = s.mag === 0;
+      const t = (w.reloadStyle === 'Mag' ? (empty ? w.reloadEmptyTime : w.reloadTime) : w.reloadTime) * rk;
+      this.reloading = { style: w.reloadStyle, endAt: now + t };
+      this.vm.playGunAnim(w.reloadStyle === 'Cylinder' ? 'Break' : 'Reload', t);
+    }
+    this.audio.click(0.8);
+  }
+
+  private updateReload(now: number) {
+    const r = this.reloading;
+    if (!r) return;
+    const s = this.cur;
+    const w = s.cfg;
+    if (r.style === 'Shell') {
+      if (now < (r.stageEnd ?? 0)) return;
+      if (r.stage === 'start' || r.stage === 'shell') {
+        if (r.stage === 'shell') {
+          s.mag++;
+          s.reserve--;
+          this.audio.click(1.2);
+        }
+        if (s.mag < w.mag && s.reserve > 0) {
+          r.stage = 'shell';
+          r.stageEnd = now + (w.shellTime ?? 0.5) * this.reloadMult;
+          this.vm.playGunAnim('Shell', (w.shellTime ?? 0.5) * this.reloadMult);
+        } else this.finishShellReload();
+      } else if (r.stage === 'end') this.reloading = null;
+      return;
+    }
+    if (now >= r.endAt) {
+      const need = w.mag - s.mag;
+      const take = Math.min(need, s.reserve);
+      s.mag += take;
+      s.reserve -= take;
+      this.reloading = null;
+      this.audio.click(1.4);
+    }
+  }
+
+  private finishShellReload() {
+    const w = this.cur.cfg;
+    const t = w.shellEnd ?? 0.4;
+    this.reloading = { style: 'Shell', endAt: Infinity, stage: 'end', stageEnd: this.now + t };
+    if (w.model === 'Pump') this.vm.playGunAnim('Pump', t);
+    else this.vm.cancelGunAnim();
+  }
+
+  private spreadDeg() {
+    const w = this.cur.cfg;
+    const sp = w.spread;
+    let s = sp.hip + (sp.ads - sp.hip) * this.adsEased;
+    const moveK = THREE.MathUtils.clamp(this.mv.speed / 12, 0, 1.5) * (1 - this.adsEased * 0.8);
+    s += sp.move * moveK;
+    if (!this.mv.grounded) s += sp.air;
+    if (this.mv.crouched && !this.mv.sliding) s *= 0.8;
+    s += this.bloom * (1 - this.adsEased * 0.7);
+    return s;
+  }
+
+  private fire(now: number) {
+    const s = this.cur;
+    const w = s.cfg;
+    s.mag--;
+    this.nextFire = now + 60 / w.rpm;
+    this.lastShot = now;
+
+    const origin = this.camera.position.clone();
+    const baseDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const spread = THREE.MathUtils.degToRad(this.spreadDeg());
+    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const muzzleWorld = this.vm.muzzleWorld.clone().applyMatrix4(this.camera.matrixWorld);
+
+    if (w.projectile) {
+      const pr = w.projectile;
+      const kind = pr.kind;
+      const mesh = projectileMesh(kind);
+      const pos = origin.clone().addScaledVector(baseDir, 1.5).addScaledVector(camRight, 0.3).addScaledVector(camUp, -0.3);
+      mesh.position.copy(pos);
+      this.scene.add(mesh);
+      this.projectiles.push({
+        kind, mesh, pos, vel: baseDir.clone().multiplyScalar(pr.speed), gravity: pr.gravity, fuseAt: now + 8, impact: true,
+        radius: pr.radius, damage: pr.damage, ownerIsPlayer: true, weapon: w.name,
+      });
+    } else {
+      const hitsThisShot: Bot[] = [];
+      for (let i = 0; i < w.pellets; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * Math.tan(spread / 2);
+        const dir = baseDir.clone().addScaledVector(camRight, Math.cos(a) * r).addScaledVector(camUp, Math.sin(a) * r).normalize();
+        const res = this.traceBullet(origin, dir, w.range, true, w, now);
+        const end = res.point;
+        if (i < 3) this.fx.tracer(muzzleWorld, end);
+        if (res.bot && !hitsThisShot.includes(res.bot)) hitsThisShot.push(res.bot);
+      }
+    }
+
+    // recoil (pattern + jitter), as in WeaponController
+    const rp = w.recoil;
+    const pat = rp.pattern[Math.min(this.shotIndex, rp.pattern.length - 1)];
+    const adsM = 1 - (1 - rp.adsMult) * this.adsEased;
+    const crouchM = this.mv.crouched ? 0.85 : 1;
+    const jx = (Math.random() - 0.5) * rp.jitter * 2;
+    const jy = (Math.random() - 0.5) * rp.jitter * 2;
+    this.recoilTarget.x += (pat.x + jx) * adsM * crouchM;
+    this.recoilTarget.y += (pat.y + jy) * adsM * crouchM;
+    this.shake.impulse(new THREE.Vector3(0.25 * w.kick * 0.15, (Math.random() - 0.5) * 0.15 * w.kick * 0.1, (Math.random() - 0.5) * 0.2 * w.kick * 0.1));
+    this.shotIndex++;
+    this.bloom = Math.min(w.spread.maxBloom, this.bloom + w.spread.perShot);
+
+    this.vm.fire(w.kick, this.adsEased);
+    this.audio.shot(w.cls);
+
+    if (w.cycle && s.mag > 0) {
+      this.cycleUntil = now + w.cycle.time;
+      setTimeout(() => {
+        if (this.cur.cfg === w) {
+          this.vm.playGunAnim(w.cls === 'Sniper' ? 'Bolt' : 'Pump', w.cycle!.time * 0.85);
+          this.audio.click(0.9);
+        }
+      }, 120);
+    }
+    if (s.mag === 0 && s.reserve > 0 && w.cls !== 'Launcher') setTimeout(() => !this.reloading && this.cur === s && this.startReload(this.now), 200);
+    if (s.mag === 0 && w.cls === 'Launcher' && s.reserve > 0) setTimeout(() => !this.reloading && this.cur === s && this.startReload(this.now), 350);
+  }
+
+  /** Hitscan bullet with damage falloff and hit registration. */
+  private traceBullet(origin: THREE.Vector3, dir: THREE.Vector3, range: number, isPlayer: boolean, w: WeaponCfg, now: number) {
+    const wh = this.world.raycast(origin, dir, range);
+    let maxD = wh ? wh.dist : range;
+    let hitBot: Bot | null = null;
+    let part: 'Head' | 'Torso' | 'Limb' = 'Torso';
+    for (const b of this.bots) {
+      const h = b.raycast(origin, dir, maxD);
+      if (h) {
+        maxD = h.dist;
+        hitBot = b;
+        part = h.part;
+      }
+    }
+    const point = origin.clone().addScaledVector(dir, maxD);
+    if (hitBot) {
+      let dmg = damageAt(w.damage, maxD);
+      if (part === 'Head') dmg *= w.headMult;
+      else if (part === 'Limb') dmg *= 0.9;
+      this.fx.blood(point, part === 'Head');
+      if (isPlayer) this.playerHitsBot(hitBot, dmg, part === 'Head', maxD, w.name, now);
+    } else if (wh) this.fx.impact(wh.point, wh.normal);
+    return { point, bot: hitBot };
+  }
+
+  private playerHitsBot(b: Bot, dmg: number, head: boolean, dist: number, weapon: string, now: number, backstab = false) {
+    if (!b.alive) return;
+    b.lastAttacker = PLAYER_ID;
+    const res = b.damage(dmg, now);
+    this.hitAt = now;
+    this.hitKill = res.killed;
+    this.hitHead = head;
+    if (res.armorBroke) this.award('ArmorBreak');
+    if (res.killed) {
+      this.audio.hit(true);
+      if (head) this.audio.headshot();
+      this.onPlayerKill(b, head, dist, weapon, now, backstab);
+    } else this.audio.hit(false);
+  }
+
+  /** Reload time multiplier (Fast Hands perk). */
+  private get reloadMult() {
+    return this.perks.has('FastHands') ? 0.75 : 1;
+  }
+
+  private onPlayerKill(b: Bot, head: boolean, dist: number, weapon: string, now: number, backstab: boolean) {
+    this.kills++;
+    if (this.perks.has('Scavenger')) {
+      const s = this.cur;
+      s.reserve = Math.min(s.cfg.reserve, s.reserve + s.cfg.mag);
+    }
+    if (this.perks.has('QuickFix')) this.lastHurt = -99;
+    // kills made by a killstreak reward never count toward the streak (no chaining)
+    const fromStreak = KillstreakWeapons.has(weapon);
+    if (!fromStreak) this.streak++;
+    this.addFeed(PLAYER_NAME, b.name, weapon, head, true, false);
+    this.award('Kill');
+    if (head) this.award('Headshot');
+    if (backstab) this.award('Backstab');
+    if (!this.firstBlood) {
+      this.firstBlood = true;
+      this.award('FirstBlood');
+    }
+    if (this.lastKiller === b.id) {
+      this.award('Revenge');
+      this.lastKiller = null;
+    }
+    if (dist >= ScoringCfg.longshot) this.award('Longshot');
+    else if (dist <= ScoringCfg.pointBlank) this.award('PointBlank');
+    if (now - this.lastKillAt <= ScoringCfg.multiWindow) this.multi++;
+    else this.multi = 1;
+    this.lastKillAt = now;
+    const multiTag = ['', '', 'DoubleKill', 'TripleKill', 'QuadKill', 'PentaKill'][Math.min(this.multi, 5)];
+    if (multiTag) this.award(multiTag);
+    if (fromStreak) return;
+    if (this.streak === 3) this.award('Streak3');
+    if (this.streak === 5) this.award('Streak5');
+    if (this.streak === 10) this.award('Streak10');
+    const reward = killstreakAt(this.streak);
+    if (reward) this.grantStreak(reward);
+  }
+
+  private award(tag: string) {
+    const t = ScoreTags[tag];
+    if (!t) return;
+    this.xp += t.xp;
+    const p = { id: ++this.uid, label: t.label, xp: t.xp, medal: !!t.medal };
+    this.popups.push({ ...p, at: this.now });
+    if (this.popups.length > 5) this.popups.shift();
+    if (t.medal) this.medalQueue.push(p);
+  }
+
+  private addFeed(killer: string, victim: string, weapon: string, headshot: boolean, killerIsPlayer: boolean, victimIsPlayer: boolean) {
+    this.killFeed.push({ id: ++this.uid, killer, victim, weapon, headshot, killerIsPlayer, victimIsPlayer, at: this.now });
+    if (this.killFeed.length > 6) this.killFeed.shift();
+  }
+
+  /**
+   * Knife attack (V / MELEE button). Lunges toward the closest enemy in front of you, then hits the
+   * best target at the moment the swing lands; hitting from behind is a one-hit kill.
+   * @param now time seconds
+   */
+  private quickMelee(now: number) {
+    this.meleeStrike(now, QuickMeleeStrike, 'Melee');
+  }
+
+  /**
+   * Runs one melee attack (quick melee, knife slash or knife stab): swing animation, optional lunge,
+   * then a hit check at the moment the blade lands.
+   * @param now time seconds
+   * @param C strike tuning
+   * @param anim viewmodel animation to play
+   */
+  private meleeStrike(now: number, C: MeleeStrikeCfg, anim: TrackKind) {
+    if (now < this.meleeReadyAt) return;
+    this.meleeReadyAt = now + C.cooldown;
+    this.busyUntil = now + C.time;
+    this.reloading = null;
+    this.ads = 0;
+    this.vm.cancelGunAnim();
+    this.vm.startTrack(anim, C.time);
+    this.audio.whoosh();
+    // lunge: step toward an enemy in front of you so the knife connects at a bit more than arm's length
+    const lo = this.camera.position.clone();
+    const ld = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    let lunge: Bot | null = null;
+    let lungeD = C.lunge ? MELEE_LUNGE_RANGE : 0;
+    for (const b of this.bots) {
+      if (!b.alive) continue;
+      const to = b.chestPos().sub(lo);
+      const d = to.length();
+      if (d > lungeD || d < C.range * 0.5) continue;
+      if (to.normalize().dot(ld) < 0.8) continue;
+      lunge = b;
+      lungeD = d;
+    }
+    if (lunge) {
+      const dir = lunge.pos.clone().sub(this.mv.pos).setY(0).normalize();
+      // stop short of the target: just long enough to cover the gap before the hit lands
+      const gap = Math.max(0, lungeD - C.range * 0.6);
+      const dur = Math.min(C.hitAt, gap / MELEE_LUNGE_SPEED);
+      this.mv.lunge(dir, MELEE_LUNGE_SPEED, now + dur);
+    }
+    setTimeout(() => {
+      if (this.dead) return;
+      const o = this.camera.position.clone();
+      const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+      for (const b of this.bots) {
+        if (!b.alive) continue;
+        const to = b.chestPos().sub(o);
+        const dist = to.length();
+        if (dist > C.range + 1) continue;
+        if (to.normalize().dot(d) < 0.55) continue;
+        // backstab: attacker behind the victim
+        const bf = new THREE.Vector3(-Math.sin(b.yaw), 0, -Math.cos(b.yaw));
+        const back = bf.dot(new THREE.Vector3(d.x, 0, d.z).normalize()) > 0.5;
+        this.fx.blood(b.chestPos());
+        this.playerHitsBot(b, back ? C.back : C.damage, false, dist, C.label, this.now, back);
+        this.shake.impulse(new THREE.Vector3(0.1, 0.05, 0));
+        return;
+      }
+      // swung at nothing: lighter kick so it still feels like a swing
+      this.shake.impulse(new THREE.Vector3(0.03, 0, 0));
+    }, C.hitAt * 1000);
+  }
+
+  /**
+   * A bot's knife swing at the player or another bot.
+   * @param bot attacker
+   * @param isPlayer whether the player is the target
+   * @param targetBot bot target when the player is not
+   * @param now time seconds
+   */
+  private botMelee(bot: Bot, isPlayer: boolean, targetBot: Bot | undefined, now: number) {
+    this.audio.whoosh();
+    const dmg = QuickMeleeCfg.damage;
+    if (isPlayer) {
+      this.damagePlayer(dmg, bot.pos.clone(), bot.name, bot, now, 'Melee');
+    } else if (targetBot && targetBot.alive) {
+      targetBot.lastAttacker = bot.id;
+      const res = targetBot.damage(dmg, now);
+      this.fx.blood(targetBot.chestPos());
+      if (res.killed) {
+        bot.kills++;
+        bot.streak++;
+        this.addFeed(bot.name, targetBot.name, 'Melee', false, false, false);
+      }
+    }
+  }
+
+  // ---- plates
+  private startPlate(now: number) {
+    this.reloading = null;
+    this.ads = 0;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.12), new THREE.MeshStandardMaterial({ color: 0x3f4a3a, roughness: 0.6 }));
+    this.plating = { start: now, end: now + ArmorCfg.applyTime };
+    this.vm.startTrack('Plate', ArmorCfg.applyTime, mesh);
+  }
+  private cancelPlate() {
+    this.plating = null;
+    this.vm.endTrack();
+  }
+  private finishPlate(now: number) {
+    this.plates--;
+    if (this.perks.has('QuickFix')) this.lastHurt = -99;
+    this.armor = Math.min(ArmorCfg.plateArmor * ArmorCfg.maxEquipped, Math.floor(this.armor / ArmorCfg.plateArmor + 1) * ArmorCfg.plateArmor);
+    this.audio.click(0.5);
+    // chain another plate while X is held
+    if (this.input.isDown('KeyX') && this.plates > 0 && this.armor < 150) {
+      this.plating = { start: now, end: now + ArmorCfg.applyTime };
+      this.vm.startTrack('Plate', ArmorCfg.applyTime, new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.12), new THREE.MeshStandardMaterial({ color: 0x3f4a3a })));
+    } else this.plating = null;
+  }
+
+  // ---- grenades
+  private startCook(kind: 'Frag' | 'Flash', now: number) {
+    this.cooking = kind;
+    this.cookStart = now;
+    this.ads = 0;
+    const item = projectileMesh(kind);
+    item.scale.setScalar(0.9);
+    this.vm.startTrack('Throw', 60, item); // held until release
+    this.audio.click(1.6);
+  }
+  private throwEquipment(now: number, inHand: boolean) {
+    const kind = this.cooking!;
+    this.cooking = null;
+    const cooked = now - this.cookStart;
+    if (kind === 'Frag') this.frags--;
+    else this.flashes--;
+    this.vm.startTrack('Throw', 0.45);
+    this.vm.dropItem();
+    this.busyUntil = now + 0.4;
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    dir.y += 0.12;
+    dir.normalize();
+    const pos = this.camera.position.clone().addScaledVector(dir, inHand ? 0 : 1.2);
+    const speed = kind === 'Frag' ? FragCfg.speed : FlashCfg.speed;
+    const mesh = projectileMesh(kind);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    const fuse = kind === 'Frag' ? FragCfg.fuse - cooked : FlashCfg.fuse;
+    this.projectiles.push({
+      kind, mesh, pos, vel: inHand ? new THREE.Vector3() : dir.multiplyScalar(speed).add(this.mv.vel.clone().multiplyScalar(0.5)), gravity: 120,
+      fuseAt: now + Math.max(0, fuse), impact: false, radius: kind === 'Frag' ? FragCfg.radius : FlashCfg.radius,
+      damage: kind === 'Frag' ? FragCfg.damage : [0, 0], ownerIsPlayer: true, weapon: kind,
+    });
+  }
+
+  private updateProjectiles(dt: number, now: number) {
+    for (const p of this.projectiles) {
+      const hitBody = (a: THREE.Vector3, b: THREE.Vector3) => {
+        const d = b.clone().sub(a);
+        const len = d.length();
+        if (len === 0) return false;
+        d.divideScalar(len);
+        return this.bots.some((bot) => !!bot.raycast(a, d, len));
+      };
+      if (stepProjectile(p, dt, now, this.world, hitBody)) {
+        p.dead = true;
+        this.scene.remove(p.mesh);
+        this.detonate(p, now);
+      } else if (p.kind === 'Rocket' && Math.random() < 0.6) this.fx.smokePuff(p.pos.clone(), 0.5, 0x999999, 0.8);
+    }
+    this.projectiles = this.projectiles.filter((p) => !p.dead);
+  }
+
+  private detonate(p: Projectile, now: number) {
+    const camDist = p.pos.distanceTo(this.camera.position);
+    if (p.kind === 'Flash') {
+      this.fx.explosion(p.pos, 3);
+      this.audio.explosion(camDist * 1.5);
+      // flash player if facing it and in view
+      if (!this.dead && camDist < p.radius && this.world.visible(p.pos.clone().add(new THREE.Vector3(0, 0.5, 0)), this.camera.position)) {
+        const to = p.pos.clone().sub(this.camera.position).normalize();
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        const facing = (fwd.dot(to) + 1) / 2;
+        const strength = (1 - camDist / p.radius) * (0.35 + 0.65 * facing);
+        this.flashAmt = Math.max(this.flashAmt, Math.min(1.2, strength * 1.4 * (this.perks.has('BattleHardened') ? 0.3 : 1)));
+        this.audio.ring(strength);
+      }
+      for (const b of this.bots) {
+        if (!b.alive) continue;
+        const d = b.headPos().distanceTo(p.pos);
+        if (d < p.radius * 0.7 && this.world.visible(p.pos.clone().add(new THREE.Vector3(0, 0.5, 0)), b.headPos())) b.flashedUntil = now + FlashCfg.duration * (1 - d / p.radius);
+      }
+      return;
+    }
+    this.fx.explosion(p.pos, p.radius);
+    this.audio.explosion(camDist);
+    this.shake.impulse(new THREE.Vector3(Math.max(0, 1 - camDist / 60) * 0.5, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.3));
+    const [maxD, minD] = p.damage;
+    const center = p.pos.clone().add(new THREE.Vector3(0, 0.5, 0));
+    let killedCount = 0;
+    for (const b of this.bots) {
+      if (!b.alive) continue;
+      const d = b.chestPos().distanceTo(p.pos);
+      if (d > p.radius) continue;
+      if (!this.world.visible(center, b.chestPos())) continue;
+      const dmg = maxD + (minD - maxD) * (d / p.radius);
+      const wasAlive = b.alive;
+      if (p.ownerIsPlayer) this.playerHitsBot(b, dmg, false, d, p.weapon, now);
+      if (wasAlive && !b.alive) killedCount++;
+    }
+    if (killedCount >= 2) this.award('Collateral');
+    // self damage
+    if (!this.dead) {
+      const pd = this.mv.pos.clone().add(new THREE.Vector3(0, 2.5, 0)).distanceTo(p.pos);
+      if (pd < p.radius && this.world.visible(center, this.camera.position)) {
+        const dmg = (maxD + (minD - maxD) * (pd / p.radius)) * (p.ownerIsPlayer ? 0.5 : 1) * (this.perks.has('EOD') ? 0.5 : 1);
+        this.damagePlayer(dmg, p.pos, p.ownerIsPlayer ? 'yourself' : 'explosion', null, now);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ killstreaks
+  /**
+   * Stores a newly earned reward, or tells the player their storage is full.
+   * @param cfg reward earned
+   */
+  private grantStreak(cfg: KillstreakCfg) {
+    if (this.held.length >= MaxHeldStreaks) {
+      this.toast(`${cfg.name.toUpperCase()} LOST \u2014 STREAKS FULL`);
+      return;
+    }
+    this.held.push(cfg.id);
+    this.audio.streakReady();
+    this.toast(`${cfg.name.toUpperCase()} READY \u2014 PRESS T`);
+  }
+
+  /**
+   * Activates the oldest held reward.
+   * @param now time seconds
+   */
+  private useStreak(now: number) {
+    if (this.dead) return;
+    const id = this.held.shift();
+    if (!id) return;
+    if (id === 'UAV') {
+      this.uavUntil = now + UavDuration;
+      this.audio.uavPing();
+      this.toast('UAV ONLINE');
+    } else if (id === 'Airstrike') this.callAirstrike(now);
+    else if (id === 'CarePackage') this.callCarePackage(now);
+    else this.callMortar(now);
+  }
+
+  /** Runs delayed callbacks whose time has come. @param now time seconds */
+  private runScheduled(now: number) {
+    if (!this.scheduled.length) return;
+    const due = this.scheduled.filter((s) => s.at <= now);
+    if (!due.length) return;
+    this.scheduled = this.scheduled.filter((s) => s.at > now);
+    due.forEach((s) => s.run());
+  }
+
+  /**
+   * One reward explosion. Damages hostiles only (no friendly fire) and credits the player's kill feed.
+   * @param pos blast center
+   * @param radius blast radius
+   * @param maxD damage at the center
+   * @param minD damage at the edge
+   * @param weapon kill feed name
+   */
+  private streakBlast(pos: THREE.Vector3, radius: number, maxD: number, minD: number, weapon: string) {
+    const now = this.now;
+    const camDist = pos.distanceTo(this.camera.position);
+    this.fx.explosion(pos, radius);
+    this.audio.explosion(camDist);
+    this.shake.impulse(new THREE.Vector3(Math.max(0, 1 - camDist / 70) * 0.5, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.3));
+    let killed = 0;
+    for (const b of this.bots) {
+      if (!b.alive) continue;
+      const d = b.chestPos().distanceTo(pos);
+      if (d > radius) continue;
+      this.playerHitsBot(b, maxD + (minD - maxD) * (d / radius), false, d, weapon, now);
+      if (!b.alive) killed++;
+    }
+    if (killed >= 2) this.award('Collateral');
+  }
+
+  /**
+   * Precision Airstrike: a line of six bombs walks across the spot the player is aiming at.
+   * @param now time seconds
+   */
+  private callAirstrike(now: number) {
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const hit = this.world.raycast(this.camera.position, dir, 160);
+    const target = hit ? hit.point.clone() : this.camera.position.clone().addScaledVector(dir, 60);
+    target.y = 0;
+    const along = new THREE.Vector3(dir.x, 0, dir.z);
+    if (along.lengthSq() < 1e-6) along.set(0, 0, -1);
+    along.normalize();
+    const lim = this.world.half - 2;
+    this.audio.whistle(1.6);
+    this.toast('AIRSTRIKE INBOUND');
+    this.fx.smokePuff(target.clone().setY(1), 0.8, 0xff7a3d, 2.5);
+    for (let i = 0; i < 6; i++) {
+      const p = target.clone().addScaledVector(along, (i - 2.5) * 9);
+      p.x = THREE.MathUtils.clamp(p.x, -lim, lim);
+      p.z = THREE.MathUtils.clamp(p.z, -lim, lim);
+      const at = now + 1.6 + i * 0.28;
+      this.scheduled.push({ at: at - 0.5, run: () => this.audio.whistle(0.5) });
+      this.scheduled.push({ at, run: () => this.streakBlast(p.clone().setY(1), 11, 200, 70, 'Airstrike') });
+    }
+  }
+
+  /**
+   * Mortar Barrage: four volleys, each shell landing near a hostile's position at the moment it hits.
+   * @param now time seconds
+   */
+  private callMortar(now: number) {
+    this.audio.whistle(1.4);
+    this.toast('MORTAR BARRAGE INBOUND');
+    for (let round = 0; round < 4; round++) {
+      const at = now + 1.5 + round * 1.1;
+      this.scheduled.push({
+        at,
+        run: () => {
+          for (const b of this.bots) {
+            if (!b.alive) continue;
+            const p = b.pos.clone();
+            p.x += (Math.random() - 0.5) * 8;
+            p.z += (Math.random() - 0.5) * 8;
+            p.y = 1;
+            this.streakBlast(p, 9, 170, 60, 'Mortar');
+          }
+        },
+      });
+      this.scheduled.push({ at: at - 0.6, run: () => this.audio.whistle(0.6) });
+    }
+  }
+
+  /**
+   * Care Package: plates, ammo and a random primary land a few steps in front of the player.
+   * @param now time seconds
+   */
+  private callCarePackage(now: number) {
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+    fwd.normalize();
+    const side = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    let base = this.mv.pos.clone();
+    for (const d of [6, 4.5, 3, 1.5, 0]) {
+      const c = this.mv.pos.clone().addScaledVector(fwd, d);
+      if (!this.world.overlaps(c.x, c.z, 1.6)) {
+        base = c;
+        break;
+      }
+    }
+    const guns = Object.values(Weapons).filter((w) => isPrimary(w.name) && w.cls !== 'Launcher');
+    const gun = guns[Math.floor(Math.random() * guns.length)];
+    this.loot.spawn({ type: 'weapon', cfg: gun, mag: gun.mag, reserve: gun.reserve }, base.clone(), now);
+    this.loot.spawn({ type: 'plates', count: 3 }, base.clone().addScaledVector(side, 1.8), now);
+    this.loot.spawn({ type: 'ammo' }, base.clone().addScaledVector(side, -1.8), now);
+    for (let i = 0; i < 4; i++) this.fx.smokePuff(base.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, 0.5 + Math.random(), (Math.random() - 0.5) * 2)), 0.5, 0xf5b92e, 1.8);
+    this.audio.streakReady();
+    this.toast(`CARE PACKAGE: ${gun.name}`);
+  }
+
+  // ------------------------------------------------------------------ loot
+  /**
+   * Drops a dead combatant's held gun, an ammo box and their carried plates around a position.
+   * @param pos feet position of the body
+   * @param weapon gun to drop (with its current ammo)
+   * @param plates armor plates carried
+   * @param now time seconds
+   */
+  private dropLoot(pos: THREE.Vector3, weapon: { cfg: WeaponCfg; mag: number; reserve: number }, plates: number, now: number) {
+    const ground = (dx: number, dz: number) => new THREE.Vector3(pos.x + dx, pos.y, pos.z + dz);
+    const a = Math.random() * Math.PI * 2;
+    const off = (k: number, r: number) => [Math.cos(a + k) * r, Math.sin(a + k) * r] as const;
+    const [wx, wz] = off(0, 0.6);
+    this.loot.spawn({ type: 'weapon', cfg: weapon.cfg, mag: weapon.mag, reserve: weapon.reserve }, ground(wx, wz), now);
+    const [ax, az] = off(2.1, 1.6);
+    this.loot.spawn({ type: 'ammo' }, ground(ax, az), now);
+    if (plates > 0) {
+      const [px, pz] = off(4.2, 1.6);
+      this.loot.spawn({ type: 'plates', count: plates }, ground(px, pz), now);
+    }
+  }
+
+  private toast(text: string) {
+    this.lootToast = { text, at: this.now };
+  }
+
+  /** Animates drops, auto-collects ammo / plates and handles weapon swaps. */
+  private updateLoot(now: number) {
+    this.loot.update(now);
+    this.nearWeapon = null;
+    if (this.dead) return;
+    const feet = this.mv.pos;
+
+    // ammo: walk over to refill both guns (only when it would actually add something)
+    const needsAmmo = this.slots.some((s) => s.reserve < s.cfg.reserve);
+    if (needsAmmo) {
+      const box = this.loot.nearest(feet, AUTO_PICKUP_RADIUS, (d) => d.kind.type === 'ammo');
+      if (box) {
+        this.slots.forEach((s) => (s.reserve = Math.min(s.cfg.reserve, s.reserve + Math.max(s.cfg.mag * 2, 2))));
+        this.loot.remove(box);
+        this.audio.click(1.4);
+        this.toast('+ AMMO');
+      }
+    }
+
+    // plates: walk over to take as many as fit
+    if (this.plates < ArmorCfg.maxCarried) {
+      const pile = this.loot.nearest(feet, AUTO_PICKUP_RADIUS, (d) => d.kind.type === 'plates');
+      if (pile && pile.kind.type === 'plates') {
+        const take = Math.min(pile.kind.count, ArmorCfg.maxCarried - this.plates);
+        this.plates += take;
+        pile.kind.count -= take;
+        if (pile.kind.count <= 0) this.loot.remove(pile);
+        this.audio.click(0.8);
+        this.toast(`+ ${take} PLATE${take > 1 ? 'S' : ''}`);
+      }
+    }
+
+    // weapons: same gun = take its ammo automatically; different gun = press E to swap
+    const gun = this.loot.nearest(feet, WEAPON_PICKUP_RADIUS, (d) => d.kind.type === 'weapon');
+    if (!gun || gun.kind.type !== 'weapon') return;
+    const held = this.slots.find((s) => s.cfg.name === (gun.kind.type === 'weapon' ? gun.kind.cfg.name : ''));
+    if (held) {
+      if (held.reserve < held.cfg.reserve && Math.hypot(gun.pos.x - feet.x, gun.pos.z - feet.z) < AUTO_PICKUP_RADIUS) {
+        held.reserve = Math.min(held.cfg.reserve, held.reserve + gun.kind.mag + gun.kind.reserve);
+        this.loot.remove(gun);
+        this.audio.click(1.4);
+        this.toast(`+ ${held.cfg.name} AMMO`);
+      }
+      return;
+    }
+    // a gun can't replace the knife slot: switch to a gun slot first
+    if (this.cur.cfg.cls === 'Melee') return;
+    this.nearWeapon = gun;
+    const busy = now < this.busyUntil || !!this.plating || !!this.cooking;
+    if (this.input.active && this.input.wasPressed('KeyE') && !busy) {
+      const old = this.cur;
+      this.slots[this.slot] = { cfg: gun.kind.cfg, mag: gun.kind.mag, reserve: gun.kind.reserve };
+      this.loot.remove(gun);
+      this.loot.spawn({ type: 'weapon', cfg: old.cfg, mag: old.mag, reserve: old.reserve }, feet.clone(), now);
+      this.vm.cancelGunAnim();
+      this.equip();
+      this.audio.click(1.1);
+      this.toast(`PICKED UP ${gun.kind.cfg.name}`);
+      this.nearWeapon = null;
+    }
+  }
+
+  // ------------------------------------------------------------------ bots
+  private updateBots(dt: number, now: number) {
+    // drop loot for any bot that died since last frame (player kills, bot-vs-bot, explosions)
+    for (const b of this.bots) {
+      if (this.botWasAlive.get(b) && !b.alive) {
+        const plates = Math.random() < 0.6 ? 1 + Math.floor(Math.random() * 2) : 0;
+        this.dropLoot(b.pos, { cfg: b.weapon, mag: b.ammo > 0 ? b.ammo : b.weapon.mag, reserve: b.weapon.mag * 2 }, plates, now);
+      }
+      this.botWasAlive.set(b, b.alive);
+    }
+    const targets = [
+      { pos: this.mv.pos, eye: this.camera.position.clone().add(new THREE.Vector3(0, -0.6, 0)), isPlayer: true, alive: !this.dead, bot: undefined as Bot | undefined },
+      ...this.bots.map((b) => ({ pos: b.pos, eye: b.chestPos(), isPlayer: false, alive: b.alive, bot: b })),
+    ];
+    for (const b of this.bots) {
+      if (!b.alive && now >= b.respawnAt) b.spawn(this.pickSpawn(), now);
+      b.update(dt, now, this.world, targets, (bot, origin, target, isPlayer, targetBot) => this.botShoot(bot, origin, target, isPlayer, targetBot, now),
+        (bot, isPlayer, targetBot) => this.botMelee(bot, isPlayer, targetBot, now));
+    }
+  }
+
+  private botShoot(bot: Bot, origin: THREE.Vector3, target: THREE.Vector3, isPlayer: boolean, targetBot: Bot | undefined, now: number) {
+    const w = bot.weapon;
+    const dist = origin.distanceTo(target);
+    // accuracy: worse at range, when the target moves fast, and when the shooter is flashed
+    let acc = 0.55 - dist / 300;
+    if (isPlayer) {
+      acc -= Math.min(this.mv.speed / 60, 0.25);
+      if (this.mv.sliding) acc -= 0.15;
+      if (this.mv.crouched) acc -= 0.05;
+    }
+    acc = THREE.MathUtils.clamp(acc, 0.08, 0.6);
+    const hit = Math.random() < acc;
+    const aim = target.clone();
+    if (!hit) aim.add(new THREE.Vector3((Math.random() - 0.5) * 6, (Math.random() - 0.3) * 4, (Math.random() - 0.5) * 6));
+    const dir = aim.sub(origin).normalize();
+    const wh = this.world.raycast(origin, dir, dist + 20);
+    const blocked = wh && wh.dist < dist - 1;
+    const end = blocked ? wh!.point : origin.clone().addScaledVector(dir, hit ? dist : dist + 20);
+    this.fx.tracer(origin, end, 0xffc070);
+    const camDist = origin.distanceTo(this.camera.position);
+    const toSrc = origin.clone().sub(this.camera.position).normalize();
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    this.audio.shot(w.cls, Math.max(camDist, 1), THREE.MathUtils.clamp(toSrc.dot(right), -1, 1));
+    if (blocked) {
+      if (wh) this.fx.impact(wh.point, wh.normal);
+      return;
+    }
+    if (!hit) return;
+    const head = Math.random() < 0.12;
+    const dmg = botDamage(w, dist) * (head ? w.headMult : 1) * 0.85;
+    if (isPlayer) this.damagePlayer(dmg, origin, bot.name, bot, now, w.name, head);
+    else if (targetBot && targetBot.alive) {
+      targetBot.lastAttacker = bot.id;
+      const res = targetBot.damage(dmg, now);
+      this.fx.blood(targetBot.chestPos(), head);
+      if (res.killed) {
+        bot.kills++;
+        bot.streak++;
+        this.addFeed(bot.name, targetBot.name, w.name, head, false, false);
+      }
+    }
+  }
+
+  private damagePlayer(dmg: number, from: THREE.Vector3, by: string, bot: Bot | null, now: number, weapon = 'Frag', head = false) {
+    if (this.dead) return;
+    const soak = Math.min(this.armor, dmg);
+    this.armor -= soak;
+    this.health -= dmg - soak;
+    this.lastHurt = now;
+    this.hurtAmt = Math.min(1, this.hurtAmt + dmg / 80);
+    this.audio.hurt();
+    this.shake.impulse(new THREE.Vector3(0.05, (Math.random() - 0.5) * 0.06, 0));
+    this.damageDirs.push({ angle: 0, age: 0, from: from.clone() });
+    if (this.plating) this.cancelPlate();
+    if (this.health <= 0) {
+      this.health = 0;
+      this.dead = true;
+      this.deaths++;
+      this.streak = 0;
+      this.held = [];
+      this.respawnAt = now + 4;
+      this.killedBy = by;
+      // the knife is never dropped: drop the gun you were holding (or your primary if you were on the knife)
+      this.dropLoot(this.mv.pos, { ...this.slots[this.slot === 2 ? 0 : this.slot] }, this.plates, now);
+      this.reloading = null;
+      this.cooking = null;
+      this.vm.endTrack();
+      if (bot) {
+        bot.kills++;
+        bot.streak++;
+        this.lastKiller = bot.id;
+        this.addFeed(bot.name, PLAYER_NAME, weapon, head, false, true);
+      } else this.addFeed(PLAYER_NAME, PLAYER_NAME, weapon, false, true, true);
+    }
+  }
+
+  // ------------------------------------------------------------------ HUD
+  private pushHud(scoped: boolean) {
+    const now = this.now;
+    const s = this.cur;
+    const level = levelFromXp(this.xp);
+    // medal queue
+    if (this.medal && now - this.medal.at > 1.8) this.medal = null;
+    if (!this.medal && this.medalQueue.length) this.medal = { ...this.medalQueue.shift()!, at: now };
+    this.popups = this.popups.filter((p) => now - p.at < 2.2);
+    this.killFeed = this.killFeed.filter((k) => now - k.at < 6);
+
+    const spreadPx = (Math.tan(THREE.MathUtils.degToRad(this.spreadDeg()) / 2) / Math.tan(THREE.MathUtils.degToRad(this.fov) / 2)) * (this.container.clientHeight / 2);
+    const uav = now < this.uavUntil;
+    const radar = this.bots
+      .filter((b) => b.alive && (uav || now - b.nextShot < 1.2 || b.pos.distanceTo(this.mv.pos) < 25))
+      .map((b) => {
+        const d = b.pos.clone().sub(this.mv.pos);
+        const s2 = Math.sin(-this.yaw);
+        const c2 = Math.cos(-this.yaw);
+        const x = d.x * c2 - d.z * s2;
+        const z = d.x * s2 + d.z * c2;
+        return { x: THREE.MathUtils.clamp(x / 80, -1, 1), y: THREE.MathUtils.clamp(z / 80, -1, 1) };
+      });
+    const fwdYaw = this.yaw;
+    const damageDirs = this.damageDirs.map((d) => {
+      const v = d.from.clone().sub(this.mv.pos);
+      const ang = Math.atan2(-v.x, -v.z) - fwdYaw;
+      return { angle: -ang, age: d.age };
+    });
+    const scoreboard = [
+      { name: PLAYER_NAME, kills: this.kills, deaths: this.deaths, isPlayer: true },
+      ...this.bots.map((b) => ({ name: b.name, kills: b.kills, deaths: b.deaths, isPlayer: false })),
+    ].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+
+    this.onHud({
+      health: this.health,
+      maxHealth: HealthCfg.max,
+      armor: this.armor,
+      plates: this.plates,
+      pickupPrompt: this.nearWeapon && this.nearWeapon.kind.type === 'weapon' ? `SWAP FOR ${this.nearWeapon.kind.cfg.name}` : null,
+      lootToast: this.lootToast && now - this.lootToast.at < 1.6 ? this.lootToast.text : null,
+      plateProgress: this.plating ? (now - this.plating.start) / (this.plating.end - this.plating.start) : 0,
+      weaponName: s.cfg.name,
+      weaponClass: s.cfg.cls,
+      ammo: s.mag,
+      reserve: s.reserve,
+      reloading: !!this.reloading,
+      slot: this.slot,
+      primaryName: this.slots[0].cfg.name,
+      secondaryName: this.slots[1].cfg.name,
+      meleeName: this.slots[2].cfg.name,
+      frags: this.frags,
+      flashes: this.flashes,
+      cookProgress: this.cooking === 'Frag' ? (now - this.cookStart) / FragCfg.fuse : 0,
+      spreadPx,
+      ads: this.adsEased,
+      scoped,
+      holdingBreath: this.holdingBreath,
+      hitmarkerAge: now - this.hitAt,
+      hitmarkerKill: this.hitKill,
+      hitmarkerHead: this.hitHead,
+      damageDirs,
+      killFeed: this.killFeed.map(({ at: _at, ...k }) => k),
+      popups: this.popups.map(({ at: _at, ...p }) => p),
+      medal: this.medal ? { id: this.medal.id, label: this.medal.label, xp: this.medal.xp, medal: true } : null,
+      kills: this.kills,
+      deaths: this.deaths,
+      streak: this.streak,
+      xp: this.xp,
+      level: level.level,
+      levelProgress: level.progress,
+      dead: this.dead,
+      respawnIn: Math.max(0, this.respawnAt - now),
+      killedBy: this.killedBy,
+      flash: Math.min(1, this.flashAmt),
+      hurt: Math.max(this.hurtAmt, this.health < 60 ? (1 - this.health / 60) * 0.6 : 0),
+      stance: this.mv.state,
+      tacSprint: this.mv.tac,
+      scoreboard,
+      showScoreboard: this.input.isDown('Tab'),
+      radar,
+      fps: this.fps,
+      streaks: this.held.map((id) => ({ id, name: Killstreaks[id].name, color: Killstreaks[id].color })),
+      nextStreak: (() => {
+        const n = nextKillstreak(this.streak);
+        return n ? { name: n.cfg.name, remaining: n.remaining, color: n.cfg.color } : null;
+      })(),
+      uav: Math.max(0, this.uavUntil - now),
+    });
+  }
+}
+
+/**
+ * Level curve from `Config.Progression`: XP to go from L to L+1 = 800 + 120 * (L - 1).
+ * @param xp total XP
+ * @returns level and progress (0..1) toward the next one
+ */
+export function levelFromXp(xp: number) {
+  let level = 1;
+  let need = 800;
+  while (xp >= need && level < 100) {
+    xp -= need;
+    level++;
+    need = 800 + 120 * (level - 1);
+  }
+  return { level, progress: xp / need };
+}

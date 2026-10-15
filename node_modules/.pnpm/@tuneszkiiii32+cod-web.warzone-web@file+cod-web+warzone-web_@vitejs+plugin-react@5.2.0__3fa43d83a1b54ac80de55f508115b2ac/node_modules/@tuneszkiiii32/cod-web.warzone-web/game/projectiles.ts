@@ -1,0 +1,80 @@
+import * as THREE from 'three';
+import type { World } from './world.js';
+
+/** A thrown or launched physical object (frag, flashbang, rocket, 40mm grenade). */
+export interface Projectile {
+  kind: 'Frag' | 'Flash' | 'Rocket' | 'Grenade';
+  mesh: THREE.Object3D;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  gravity: number;
+  fuseAt: number; // time it detonates (Infinity = on impact)
+  impact: boolean;
+  radius: number;
+  damage: [number, number];
+  ownerIsPlayer: boolean;
+  weapon: string;
+  dead?: boolean;
+}
+
+/**
+ * Builds a mesh for a projectile kind.
+ * @param kind projectile kind
+ * @returns mesh
+ */
+export function projectileMesh(kind: Projectile['kind']): THREE.Object3D {
+  if (kind === 'Rocket') {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.2, 8), new THREE.MeshStandardMaterial({ color: 0x4c5a3a }));
+    body.rotation.x = Math.PI / 2;
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffb050 }));
+    glow.position.z = 0.7;
+    g.add(body, glow);
+    return g;
+  }
+  if (kind === 'Flash') {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.6, 10), new THREE.MeshStandardMaterial({ color: 0xd2d2d7, metalness: 0.5, roughness: 0.4 }));
+    return m;
+  }
+  return new THREE.Mesh(new THREE.SphereGeometry(kind === 'Grenade' ? 0.2 : 0.3, 10, 8), new THREE.MeshStandardMaterial({ color: 0x46563a, roughness: 0.6 }));
+}
+
+/**
+ * Steps a projectile with gravity and bouncing; returns true when it should detonate this frame.
+ * @param p projectile
+ * @param dt delta seconds
+ * @param now time seconds
+ * @param world collision world
+ * @param hitBody optional body test (rockets/40mm detonate on characters)
+ * @returns whether to detonate
+ */
+export function stepProjectile(p: Projectile, dt: number, now: number, world: World, hitBody?: (a: THREE.Vector3, b: THREE.Vector3) => boolean): boolean {
+  if (now >= p.fuseAt) return true;
+  p.vel.y -= p.gravity * dt;
+  const step = p.vel.clone().multiplyScalar(dt);
+  const len = step.length();
+  if (len > 0) {
+    const dir = step.clone().divideScalar(len);
+    const hit = world.raycast(p.pos, dir, len + 0.25);
+    const next = p.pos.clone().add(step);
+    if (p.impact && hitBody && hitBody(p.pos, next)) {
+      p.pos.copy(next);
+      return true;
+    }
+    if (hit) {
+      if (p.impact) {
+        p.pos.copy(hit.point).addScaledVector(hit.normal, 0.3);
+        return true;
+      }
+      p.pos.copy(hit.point).addScaledVector(hit.normal, 0.3);
+      p.vel.reflect(hit.normal).multiplyScalar(0.4);
+      if (hit.normal.y > 0.7 && Math.abs(p.vel.y) < 4) p.vel.y = 0;
+      p.vel.x *= 0.8;
+      p.vel.z *= 0.8;
+    } else p.pos.copy(next);
+  }
+  p.mesh.position.copy(p.pos);
+  if (p.kind === 'Rocket' || p.kind === 'Grenade') p.mesh.lookAt(p.pos.clone().sub(p.vel));
+  else p.mesh.rotation.x += dt * p.vel.length() * 0.4;
+  return false;
+}

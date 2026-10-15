@@ -1,0 +1,1 @@
+[{"name":"","description":"Root of the browser port of the Roblox CoD MW2019-style FPS.\nOwns the menu / pause flow and mounts the Three.js game (loaded lazily so SSR stays safe).","args":[],"returns":{"description":"the app","type":null},"access":"public","examples":[],"render":"","properties":[],"static":false,"filePath":"warzone-web.tsx"}]

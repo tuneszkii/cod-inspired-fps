@@ -1,0 +1,82 @@
+2026-10-15T15:37:27.020Z 396 start -p 3000 --use-source, started
+2026-10-15T15:37:31.150Z 568 status --json, started
+2026-10-15T15:37:31.178Z 568 status --json, succeeded
+2026-10-15T15:38:45.540Z 815 templates, started
+2026-10-15T15:38:45.641Z 815 templates, succeeded
+2026-10-15T15:38:50.897Z 854 create react-app warzone-web --scope tuneszkiiii32.cod-web --env bitdev.react/react-env@6.0.33, started
+2026-10-15T15:38:54.353Z 883 mini-status --json, started
+2026-10-15T15:38:54.423Z 883 mini-status --json, succeeded
+2026-10-15T15:38:54.451Z 895 ls --json, started
+2026-10-15T15:38:54.511Z 895 ls --json, succeeded
+2026-10-15T15:39:21.467Z 854 create react-app warzone-web --scope tuneszkiiii32.cod-web --env bitdev.react/react-env@6.0.33, succeeded
+2026-10-15T15:39:27.385Z 1159 install three@^0.186.1 @types/three@^0.186.0, started
+2026-10-15T15:39:33.097Z 1252 mini-status --json, started
+2026-10-15T15:39:33.185Z 1252 mini-status --json, succeeded
+2026-10-15T15:39:33.322Z 1271 ls --json, started
+2026-10-15T15:39:33.422Z 1271 ls --json, succeeded
+2026-10-15T15:39:36.175Z 1387 mini-status --json, started
+2026-10-15T15:39:36.203Z 1362 ls --json, started
+2026-10-15T15:39:36.263Z 1387 mini-status --json, succeeded
+2026-10-15T15:39:36.266Z 1362 ls --json, succeeded
+2026-10-15T15:39:40.670Z 1159 install three@^0.186.1 @types/three@^0.186.0, succeeded
+2026-10-15T15:42:18.182Z 1727 mini-status --json, started
+2026-10-15T15:42:18.248Z 1727 mini-status --json, succeeded
+2026-10-15T15:42:18.255Z 1733 ls --json, started
+2026-10-15T15:42:18.317Z 1733 ls --json, succeeded
+2026-10-15T15:53:09.842Z 1955 get-deps tuneszkiiii32.cod-web/warzone-web --json -c, started
+2026-10-15T15:53:09.953Z 1978 status --json, started
+2026-10-15T15:53:12.793Z 1955 get-deps tuneszkiiii32.cod-web/warzone-web --json -c, succeeded
+2026-10-15T15:53:13.598Z 1978 status --json, succeeded
+2026-10-15T16:05:29.641Z 2201 mini-status --json, started
+2026-10-15T16:05:29.690Z 2189 ls --json, started
+2026-10-15T16:05:29.703Z 2201 mini-status --json, succeeded
+2026-10-15T16:05:29.760Z 2189 ls --json, succeeded
+2026-10-15T16:06:24.099Z 2330 mini-status --json, started
+2026-10-15T16:06:24.197Z 2349 ls --json, started
+2026-10-15T16:06:24.200Z 2330 mini-status --json, succeeded
+2026-10-15T16:06:24.263Z 2349 ls --json, succeeded
+2026-10-15T16:07:46.680Z 2469 mini-status --json, started
+2026-10-15T16:07:46.694Z 2487 ls --json, started
+2026-10-15T16:07:46.782Z 2487 ls --json, succeeded
+2026-10-15T16:07:46.784Z 2469 mini-status --json, succeeded
+2026-10-15T16:10:35.493Z 2749 mini-status --json, started
+2026-10-15T16:10:35.564Z 2761 ls --json, started
+2026-10-15T16:10:35.590Z 2749 mini-status --json, succeeded
+2026-10-15T16:10:35.671Z 2761 ls --json, succeeded
+2026-10-15T16:13:16.066Z 2915 ls --json, started
+2026-10-15T16:13:16.128Z 2915 ls --json, succeeded
+2026-10-15T16:13:16.131Z 2938 mini-status --json, started
+2026-10-15T16:13:16.202Z 2938 mini-status --json, succeeded
+2026-10-15T16:13:33.704Z 3039 ls --json, started
+2026-10-15T16:13:33.715Z 3058 mini-status --json, started
+2026-10-15T16:13:33.779Z 3039 ls --json, succeeded
+2026-10-15T16:13:33.790Z 3058 mini-status --json, succeeded
+2026-10-15T16:14:16.498Z 3204 mini-status --json, started
+2026-10-15T16:14:16.548Z 3202 ls --json, started
+2026-10-15T16:14:16.569Z 3204 mini-status --json, succeeded
+2026-10-15T16:14:16.616Z 3202 ls --json, succeeded
+2026-10-15T16:14:27.976Z 3378 mini-status --json, started
+2026-10-15T16:14:28.047Z 3378 mini-status --json, succeeded
+2026-10-15T16:14:28.098Z 3397 ls --json, started
+2026-10-15T16:14:28.162Z 3397 ls --json, succeeded
+2026-10-15T16:14:41.590Z 3568 mini-status --json, started
+2026-10-15T16:14:41.636Z 3569 ls --json, started
+2026-10-15T16:14:41.661Z 3568 mini-status --json, succeeded
+2026-10-15T16:14:41.714Z 3569 ls --json, succeeded
+2026-10-15T16:14:58.968Z 3753 mini-status --json, started
+2026-10-15T16:14:59.026Z 3754 ls --json, started
+2026-10-15T16:14:59.103Z 3754 ls --json, succeeded
+2026-10-15T16:14:59.109Z 3753 mini-status --json, succeeded
+2026-10-15T16:15:00.941Z 3837 check-types cod-web/warzone-web, started
+2026-10-15T16:15:04.085Z 3837 check-types cod-web/warzone-web, succeeded
+2026-10-15T16:15:18.521Z 3956 app list, started
+2026-10-15T16:15:20.035Z 4011 mini-status --json, started
+2026-10-15T16:15:20.081Z 4009 ls --json, started
+2026-10-15T16:15:20.122Z 4011 mini-status --json, succeeded
+2026-10-15T16:15:20.154Z 4009 ls --json, succeeded
+2026-10-15T16:15:21.668Z 3956 app list, succeeded
+2026-10-15T16:15:30.046Z 4147 run warzone-web -p 3001, started
+2026-10-15T16:16:47.434Z 4574 validate, started
+2026-10-15T16:17:08.797Z 4574 validate, succeeded
+2026-10-15T16:31:14.809Z 4822 server --compile, started
+2026-10-15T16:31:21.384Z 5076 start --no-browser, started

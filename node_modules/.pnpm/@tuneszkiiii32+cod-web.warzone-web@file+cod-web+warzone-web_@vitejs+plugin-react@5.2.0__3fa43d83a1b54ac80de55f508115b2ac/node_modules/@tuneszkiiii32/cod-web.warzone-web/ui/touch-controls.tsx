@@ -1,0 +1,212 @@
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import type { Input } from '../game/input.js';
+import styles from './touch-controls.module.css';
+
+/** Props for {@link TouchControls}. */
+export interface TouchControlsProps {
+  /** Game input to drive. */
+  input: Input;
+  /** Opens the pause menu. */
+  onPause: () => void;
+  /** Shows the PICK button when a dropped weapon is in reach. */
+  canPickup?: boolean;
+  /** True while the knife is equipped: FIRE slashes, AIM becomes a lunging stab, and KNF switches back. */
+  knifeHeld?: boolean;
+  /** Shows the STRK button while a killstreak reward is waiting. */
+  hasStreak?: boolean;
+}
+
+const STICK_RADIUS = 56;
+
+/** Captures a pointer, ignoring browsers/pointers that refuse capture (it throws, which would abort the handler). */
+function capture(el: Element, id: number) {
+  try {
+    el.setPointerCapture(id);
+  } catch {
+    /* capture is best-effort */
+  }
+}
+const LOOK_GAIN = 1.6;
+
+/**
+ * On-screen controls for phones and tablets: a virtual move stick (left), drag-to-look (right half)
+ * and action buttons (fire, aim, jump, crouch, reload, swap, sprint, grenade, pause).
+ * AIM is a toggle (tap to aim in, tap again to aim out), and dragging while holding FIRE turns the camera.
+ * @param props touch control props
+ * @returns touch overlay
+ */
+export function TouchControls({ input, onPause, canPickup = false, knifeHeld = false, hasStreak = false }: TouchControlsProps) {
+  const stickId = useRef<number | null>(null);
+  const stickOrigin = useRef({ x: 0, y: 0 });
+  const knob = useRef<HTMLDivElement>(null);
+  const base = useRef<HTMLDivElement>(null);
+  const lookId = useRef<number | null>(null);
+  const lookLast = useRef({ x: 0, y: 0 });
+  const fireId = useRef<number | null>(null);
+  const fireLast = useRef({ x: 0, y: 0 });
+  const [aiming, setAiming] = useState(false);
+
+  useEffect(
+    () => () => {
+      input.setStick(0, 0);
+      input.setKey('Mouse2', false);
+      input.setKey('Mouse0', false);
+    },
+    [input]
+  );
+
+  // switching to the knife must clear a toggled-on aim, or it would stab every cooldown
+  useEffect(() => {
+    input.setKey('Mouse2', false);
+    setAiming(false);
+  }, [knifeHeld, input]);
+
+  /** Toggles aim-down-sights on each tap. */
+  const toggleAim = (e: RPointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // read the real input state so the toggle stays in sync if held keys were cleared (blur / pause)
+    const next = !input.isDown('Mouse2');
+    input.setKey('Mouse2', next);
+    setAiming(next);
+  };
+
+  /** Fire button: holds the trigger and turns the camera while the finger drags. */
+  const fireDown = (e: RPointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (fireId.current !== null) return;
+    capture(e.currentTarget, e.pointerId);
+    fireId.current = e.pointerId;
+    fireLast.current = { x: e.clientX, y: e.clientY };
+    input.setKey('Mouse0', true);
+  };
+  const fireMove = (e: RPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerId !== fireId.current) return;
+    input.addLook((e.clientX - fireLast.current.x) * LOOK_GAIN, (e.clientY - fireLast.current.y) * LOOK_GAIN);
+    fireLast.current = { x: e.clientX, y: e.clientY };
+  };
+  const fireUp = (e: RPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerId !== fireId.current) return;
+    fireId.current = null;
+    input.setKey('Mouse0', false);
+  };
+
+  const stickDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (stickId.current !== null) return;
+    capture(e.currentTarget, e.pointerId);
+    stickId.current = e.pointerId;
+    stickOrigin.current = { x: e.clientX, y: e.clientY };
+    if (base.current) {
+      base.current.style.left = `${e.clientX}px`;
+      base.current.style.top = `${e.clientY}px`;
+      base.current.style.opacity = '1';
+    }
+  };
+  const stickMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerId !== stickId.current) return;
+    let dx = e.clientX - stickOrigin.current.x;
+    let dy = e.clientY - stickOrigin.current.y;
+    const len = Math.hypot(dx, dy);
+    if (len > STICK_RADIUS) {
+      dx = (dx / len) * STICK_RADIUS;
+      dy = (dy / len) * STICK_RADIUS;
+    }
+    if (knob.current) knob.current.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    const nx = dx / STICK_RADIUS;
+    const nz = dy / STICK_RADIUS;
+    input.setStick(nx, nz);
+    // push the stick all the way forward to sprint
+    input.setKey('ShiftLeft', nz < -0.92 && Math.abs(nx) < 0.4);
+  };
+  const stickUp = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerId !== stickId.current) return;
+    stickId.current = null;
+    input.setStick(0, 0);
+    input.setKey('ShiftLeft', false);
+    if (knob.current) knob.current.style.transform = 'translate(-50%, -50%)';
+    if (base.current) base.current.style.opacity = '0.55';
+  };
+
+  const lookDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (lookId.current !== null) return;
+    capture(e.currentTarget, e.pointerId);
+    lookId.current = e.pointerId;
+    lookLast.current = { x: e.clientX, y: e.clientY };
+  };
+  const lookMove = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerId !== lookId.current) return;
+    input.addLook((e.clientX - lookLast.current.x) * LOOK_GAIN, (e.clientY - lookLast.current.y) * LOOK_GAIN);
+    lookLast.current = { x: e.clientX, y: e.clientY };
+  };
+  const lookUp = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.pointerId === lookId.current) lookId.current = null;
+  };
+
+  /** Hold-style button bound to a key code. */
+  const hold = (code: string) => ({
+    onPointerDown: (e: RPointerEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      capture(e.currentTarget, e.pointerId);
+      input.setKey(code, true);
+    },
+    onPointerUp: () => input.setKey(code, false),
+    onPointerCancel: () => input.setKey(code, false),
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+  });
+
+  return (
+    <div className={styles.root}>
+      <div className={styles.stickZone} onPointerDown={stickDown} onPointerMove={stickMove} onPointerUp={stickUp} onPointerCancel={stickUp}>
+        <div ref={base} className={styles.stickBase}>
+          <div ref={knob} className={styles.stickKnob} />
+        </div>
+      </div>
+      <div className={styles.lookZone} onPointerDown={lookDown} onPointerMove={lookMove} onPointerUp={lookUp} onPointerCancel={lookUp} />
+
+      <button className={styles.pause} onClick={onPause} aria-label="Pause">
+        ❚❚
+      </button>
+
+      <div className={styles.actions}>
+        <button
+          className={`${styles.btn} ${styles.fire}`}
+          onPointerDown={fireDown}
+          onPointerMove={fireMove}
+          onPointerUp={fireUp}
+          onPointerCancel={fireUp}
+          onContextMenu={(e) => e.preventDefault()}
+          aria-label="Fire (drag to look)"
+        >
+          FIRE
+        </button>
+        <button
+          className={`${styles.btn} ${styles.ads} ${aiming ? styles.active : ''}`}
+          {...(knifeHeld ? hold('Mouse2') : { onPointerDown: toggleAim })}
+          onContextMenu={(e) => e.preventDefault()}
+          aria-label={knifeHeld ? 'Knife stab' : 'Toggle aim'}
+          aria-pressed={knifeHeld ? undefined : aiming}
+        >
+          {knifeHeld ? 'STAB' : 'AIM'}
+        </button>
+        <button className={`${styles.btn} ${styles.knife}`} {...hold(knifeHeld ? 'Digit1' : 'Digit3')} aria-label={knifeHeld ? 'Put knife away' : 'Equip knife'}>
+          {knifeHeld ? 'GUN' : 'KNF'}
+        </button>
+        <button className={`${styles.btn} ${styles.jump}`} {...hold('Space')} aria-label="Jump">JUMP</button>
+        <button className={`${styles.btn} ${styles.crouch}`} {...hold('KeyC')} aria-label="Crouch / slide">CRCH</button>
+        <button className={`${styles.btn} ${styles.reload}`} {...hold('KeyR')} aria-label="Reload">R</button>
+        <button className={`${styles.btn} ${styles.swap}`} {...hold('KeyF')} aria-label="Swap weapon">⇄</button>
+        <button className={`${styles.btn} ${styles.frag}`} {...hold('KeyG')} aria-label="Frag grenade">G</button>
+        <button className={`${styles.btn} ${styles.plate}`} {...hold('KeyX')} aria-label="Armor plate">▣</button>
+        <button className={`${styles.btn} ${styles.melee}`} {...hold('KeyV')} aria-label="Melee">MLE</button>
+        {hasStreak && (
+          <button className={`${styles.btn} ${styles.streak}`} {...hold('KeyT')} aria-label="Use killstreak">STRK</button>
+        )}
+        {canPickup && (
+          <button className={`${styles.btn} ${styles.pick}`} {...hold('KeyE')} aria-label="Pick up weapon">PICK</button>
+        )}
+      </div>
+    </div>
+  );
+}

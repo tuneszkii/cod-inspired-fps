@@ -1,0 +1,219 @@
+import * as THREE from 'three';
+import type { WeaponCfg } from './config.js';
+import type { CamoCfg } from './cosmetics.js';
+
+/** A built gun mesh with named attachment points (gun-local space, -Z = forward). */
+export interface GunModel {
+  root: THREE.Group;
+  mag: THREE.Object3D | null;
+  magRest: THREE.Vector3;
+  bolt: THREE.Object3D | null;
+  pump: THREE.Object3D | null;
+  muzzle: THREE.Vector3;
+  rightGrip: THREE.Vector3;
+  leftGrip: THREE.Vector3;
+  sight: THREE.Vector3; // point that sits on the eye line when aiming
+  hasScope: boolean;
+  flash: THREE.Mesh;
+  flashLight: THREE.PointLight;
+}
+
+const darkMetal = new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.5, metalness: 0.25 });
+const midMetal = new THREE.MeshStandardMaterial({ color: 0x55555b, roughness: 0.5, metalness: 0.25 });
+// semi-transparent so the scope lens doesn't black out the view while the gun is rising into ADS
+const glass = new THREE.MeshStandardMaterial({ color: 0x0c1824, roughness: 0.05, metalness: 0.9, emissive: 0x05121c, transparent: true, opacity: 0.35, depthWrite: false });
+
+/**
+ * Procedurally builds a weapon mesh from its class/model (port of `GunBuilder.luau`, simplified).
+ * Scale: 1 unit ~= 1 stud. The viewmodel is drawn in camera space so absolute size only affects framing.
+ * @param cfg weapon config
+ * @param camo optional cosmetic camo applied to the gun body (player viewmodel only)
+ * @returns gun model with attachment points
+ */
+export function buildGun(cfg: WeaponCfg, camo?: CamoCfg): GunModel {
+  const root = new THREE.Group();
+  const body =
+    camo && camo.color !== null
+      ? new THREE.MeshStandardMaterial({ color: camo.color, roughness: camo.roughness, metalness: camo.metalness, emissive: camo.emissive ?? 0x000000 })
+      : new THREE.MeshStandardMaterial({ color: new THREE.Color(cfg.color).multiplyScalar(1.6), roughness: 0.6, metalness: 0.15 });
+  const box = (w: number, h: number, d: number, x: number, y: number, z: number, mat: THREE.Material = body, parent: THREE.Object3D = root) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = false;
+    parent.add(m);
+    return m;
+  };
+  const cyl = (r: number, len: number, x: number, y: number, z: number, mat: THREE.Material = darkMetal, parent: THREE.Object3D = root) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), mat);
+    m.rotation.x = Math.PI / 2;
+    m.position.set(x, y, z);
+    parent.add(m);
+    return m;
+  };
+
+  let mag: THREE.Object3D | null = null;
+  let bolt: THREE.Object3D | null = null;
+  let pump: THREE.Object3D | null = null;
+  let muzzle = new THREE.Vector3(0, 0.05, -1.6);
+  let rightGrip = new THREE.Vector3(0, -0.25, 0.15);
+  let leftGrip = new THREE.Vector3(0, -0.12, -0.7);
+  let sight = new THREE.Vector3(0, 0.22, 0);
+  let hasScope = false;
+
+  const m = cfg.model;
+  const cls = cfg.cls;
+
+  if (cls === 'Melee') {
+    // combat knife, blade pointing forward (-Z): grip, guard, blade and a tapered tip
+    // low metalness + a little emissive: the viewmodel scene has no environment map, so a mirror-like
+    // metal would render nearly black
+    const steel = new THREE.MeshStandardMaterial({ color: 0xdfe3ea, roughness: 0.35, metalness: 0.15, emissive: 0x4a4e56 });
+    box(0.11, 0.13, 0.5, 0, 0, 0.18, darkMetal); // handle
+    box(0.13, 0.15, 0.06, 0, 0, -0.1, midMetal); // pommel-side guard
+    box(0.04, 0.2, 0.08, 0, 0, -0.1, midMetal); // cross guard
+    box(0.035, 0.17, 0.85, 0, 0.01, -0.55, steel); // blade
+    box(0.012, 0.03, 0.8, 0, -0.07, -0.55, midMetal); // edge bevel
+    const tip = box(0.035, 0.12, 0.12, 0, 0.01, -1.0, steel);
+    tip.rotation.x = Math.PI / 4;
+    muzzle = new THREE.Vector3(0, 0, -1.1);
+    rightGrip = new THREE.Vector3(0, -0.02, 0.2);
+    leftGrip = new THREE.Vector3(-0.7, -0.5, 0.5); // off hand stays low and out of the way
+    sight = new THREE.Vector3(0, 0.2, 0);
+  } else if (cls === 'Pistol' || cls === 'Revolver') {
+    const long = cls === 'Revolver';
+    box(0.16, 0.2, long ? 0.95 : 0.75, 0, 0.05, -0.2, cls === 'Revolver' ? body : darkMetal);
+    box(0.15, 0.36, 0.2, 0, -0.18, 0.08, body).rotation.x = -0.25;
+    if (long) {
+      const cylM = cyl(0.13, 0.28, 0, 0.0, -0.08, midMetal);
+      cylM.rotation.z = Math.PI / 2;
+      cylM.rotation.set(Math.PI / 2, 0, 0);
+      cyl(0.05, 0.7, 0, 0.08, -0.6, midMetal);
+      muzzle = new THREE.Vector3(0, 0.08, -0.98);
+    } else {
+      mag = box(0.11, 0.3, 0.14, 0, -0.22, 0.09, darkMetal);
+      muzzle = new THREE.Vector3(0, 0.08, -0.6);
+    }
+    box(0.03, 0.05, 0.04, 0, 0.17, long ? -0.62 : -0.5, darkMetal);
+    box(0.08, 0.05, 0.04, 0, 0.17, 0.12, darkMetal);
+    rightGrip = new THREE.Vector3(0, -0.2, 0.1);
+    leftGrip = new THREE.Vector3(0.0, -0.24, 0.05);
+    sight = new THREE.Vector3(0, 0.2, 0);
+  } else if (cls === 'Launcher') {
+    if (m === 'Grenade') {
+      cyl(0.13, 1.1, 0, 0.05, -0.5, darkMetal);
+      box(0.18, 0.2, 0.7, 0, -0.02, 0.35, body);
+      box(0.14, 0.3, 0.16, 0, -0.22, 0.1, body).rotation.x = -0.3;
+      muzzle = new THREE.Vector3(0, 0.05, -1.05);
+      leftGrip = new THREE.Vector3(0, -0.1, -0.55);
+      sight = new THREE.Vector3(0, 0.28, 0);
+      box(0.04, 0.14, 0.04, 0, 0.22, -0.4, darkMetal);
+    } else {
+      cyl(0.13, 2.4, 0, 0.05, -0.4, body);
+      const war = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 10), new THREE.MeshStandardMaterial({ color: 0x4c5a3a, roughness: 0.6 }));
+      war.rotation.x = -Math.PI / 2;
+      war.position.set(0, 0.05, -1.85);
+      root.add(war);
+      mag = war;
+      box(0.12, 0.3, 0.14, 0, -0.2, 0.0, darkMetal);
+      box(0.12, 0.3, 0.14, 0, -0.2, -0.6, darkMetal);
+      box(0.12, 0.2, 0.3, 0.16, 0.25, -0.3, darkMetal);
+      muzzle = new THREE.Vector3(0, 0.05, -2.1);
+      leftGrip = new THREE.Vector3(0, -0.25, -0.6);
+      sight = new THREE.Vector3(0.16, 0.38, 0);
+    }
+  } else {
+    // long guns
+    const len = { AR: 1.6, SMG: 1.1, Shotgun: 2.0, LMG: 2.1, Marksman: 2.0, Sniper: 2.4 }[cls as 'AR'] ?? 1.6;
+    const recLen = cls === 'SMG' ? 0.8 : 1.0;
+    // receiver
+    box(0.2, 0.26, recLen, 0, 0, -0.1, body);
+    // upper rail
+    box(0.12, 0.05, recLen * 0.9, 0, 0.155, -0.1, darkMetal);
+    // handguard
+    const hgLen = len - recLen * 0.75;
+    box(0.18, 0.2, hgLen, 0, 0.0, -0.1 - recLen / 2 - hgLen / 2 + 0.1, cls === 'Shotgun' && m === 'Pump' ? darkMetal : midMetal);
+    // barrel
+    const barrelZ = -0.1 - recLen / 2 - hgLen + 0.1;
+    cyl(cls === 'Shotgun' ? 0.06 : 0.035, 0.6, 0, 0.04, barrelZ - 0.25, darkMetal);
+    if (m === 'Break') cyl(0.06, 0.6, 0, -0.08, barrelZ - 0.25, darkMetal);
+    muzzle = new THREE.Vector3(0, 0.04, barrelZ - 0.55);
+    // stock
+    if (cls !== 'SMG' || cfg.name === 'MP5') {
+      const stock = box(0.14, 0.22, 0.7, 0, -0.06, 0.65, cls === 'Sniper' || cls === 'Marksman' || m === 'Pump' || cfg.name === 'AK47' ? body : darkMetal);
+      stock.rotation.x = 0.06;
+    }
+    // pistol grip
+    box(0.13, 0.32, 0.16, 0, -0.24, 0.22, darkMetal).rotation.x = -0.3;
+    // magazine
+    if (cls === 'Shotgun') {
+      if (m === 'Pump') pump = box(0.17, 0.16, 0.45, 0, -0.14, -0.85, midMetal);
+      else if (m !== 'Break') mag = box(0.12, 0.3, 0.2, 0, -0.26, -0.15, darkMetal);
+    } else if (cfg.name === 'P90') {
+      mag = box(0.14, 0.08, 0.8, 0, 0.2, -0.2, new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.3, transparent: true, opacity: 0.85 }));
+    } else if (cls === 'LMG') {
+      mag = box(0.32, 0.32, 0.36, 0.06, -0.26, -0.15, midMetal);
+    } else {
+      const curved = cfg.name === 'AK47';
+      mag = box(0.11, cls === 'Sniper' ? 0.18 : 0.42, 0.18, 0, cls === 'Sniper' ? -0.2 : -0.32, -0.12, darkMetal);
+      if (curved) mag.rotation.x = 0.25;
+    }
+    // bolt handle for snipers
+    if (cls === 'Sniper') bolt = box(0.18, 0.05, 0.05, 0.14, 0.08, 0.05, midMetal);
+    // optic
+    if (cls === 'Sniper') {
+      hasScope = true;
+      cyl(0.09, 0.9, 0, 0.32, -0.1, darkMetal);
+      cyl(0.12, 0.2, 0, 0.32, -0.6, darkMetal);
+      cyl(0.11, 0.18, 0, 0.32, 0.38, darkMetal);
+      const lens = cyl(0.1, 0.01, 0, 0.32, 0.48, glass);
+      lens.rotation.x = Math.PI / 2;
+      box(0.06, 0.1, 0.05, 0, 0.22, -0.3, darkMetal);
+      box(0.06, 0.1, 0.05, 0, 0.22, 0.15, darkMetal);
+      sight = new THREE.Vector3(0, 0.32, 0);
+    } else if (cls === 'AR' || cls === 'SMG' || cls === 'LMG' || cls === 'Marksman') {
+      // open holographic/red-dot sight: a low mount plus a hollow frame, so the eye line (y = 0.29)
+      // passes through an empty window instead of a solid block
+      const sy = 0.29;
+      const half = 0.085; // half-size of the see-through window
+      const wall = 0.014;
+      const depth = 0.2;
+      box(0.12, 0.04, depth, 0, 0.19, 0.0, darkMetal); // mount on the rail
+      box(wall, half * 2 + wall * 2, depth, -half - wall / 2, sy, 0.0, darkMetal); // left wall
+      box(wall, half * 2 + wall * 2, depth, half + wall / 2, sy, 0.0, darkMetal); // right wall
+      box(half * 2 + wall * 2, wall, depth, 0, sy + half + wall / 2, 0.0, darkMetal); // hood
+      box(half * 2 + wall * 2, wall, depth, 0, sy - half - wall / 2, 0.0, darkMetal); // bottom of the window
+      // faint tinted glass at the front of the window
+      const pane = new THREE.Mesh(
+        new THREE.PlaneGeometry(half * 2, half * 2),
+        new THREE.MeshBasicMaterial({ color: 0x9fd6ff, transparent: true, opacity: 0.08, depthWrite: false })
+      );
+      pane.position.set(0, sy, -depth / 2);
+      root.add(pane);
+      // the dot itself floats in the middle of the window, slightly beyond the glass
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(0.007, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2020 }));
+      dot.position.set(0, sy, -depth / 2 - 0.01);
+      root.add(dot);
+      sight = new THREE.Vector3(0, sy, 0);
+    } else {
+      box(0.03, 0.06, 0.04, 0, 0.14, barrelZ + 0.05, darkMetal);
+      sight = new THREE.Vector3(0, 0.19, 0);
+    }
+    rightGrip = new THREE.Vector3(0, -0.3, 0.24);
+    leftGrip = new THREE.Vector3(0, -0.12, pump ? -0.85 : -0.1 - recLen / 2 - hgLen * 0.45);
+  }
+
+  // muzzle flash
+  const flash = new THREE.Mesh(
+    new THREE.ConeGeometry(0.12, 0.5, 8, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffd080, transparent: true, opacity: 0.95, depthWrite: false, side: THREE.DoubleSide })
+  );
+  flash.rotation.x = -Math.PI / 2;
+  flash.position.copy(muzzle).add(new THREE.Vector3(0, 0, -0.25));
+  flash.visible = false;
+  root.add(flash);
+  const flashLight = new THREE.PointLight(0xffb060, 0, 12, 2);
+  flashLight.position.copy(muzzle);
+  root.add(flashLight);
+
+  return { root, mag, magRest: mag ? mag.position.clone() : new THREE.Vector3(), bolt, pump, muzzle, rightGrip, leftGrip, sight, hasScope, flash, flashLight };
+}

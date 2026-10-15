@@ -1,0 +1,172 @@
+import * as THREE from 'three';
+import type { WeaponCfg } from './config.js';
+import { buildGun } from './gun-model.js';
+
+/** What a dropped item contains. */
+export type LootKind =
+  | { type: 'weapon'; cfg: WeaponCfg; mag: number; reserve: number }
+  | { type: 'ammo' }
+  | { type: 'plates'; count: number };
+
+/** A dropped item lying in the world. */
+export interface LootDrop {
+  id: number;
+  kind: LootKind;
+  pos: THREE.Vector3;
+  mesh: THREE.Group;
+  /** Time (seconds) the drop was created. */
+  born: number;
+  /** Small random phase so drops don't bob in sync. */
+  phase: number;
+}
+
+/** How long a drop stays in the world before despawning (seconds). */
+export const LOOT_LIFETIME = 45;
+/** Maximum number of drops kept at once (oldest are removed first). */
+const MAX_DROPS = 30;
+
+const ammoMat = new THREE.MeshStandardMaterial({ color: 0x4d5a2c, roughness: 0.7 });
+const ammoLidMat = new THREE.MeshStandardMaterial({ color: 0xc9a43a, roughness: 0.5, metalness: 0.4 });
+const plateMat = new THREE.MeshStandardMaterial({ color: 0x2f4a6b, roughness: 0.55, metalness: 0.2 });
+const plateEdgeMat = new THREE.MeshStandardMaterial({ color: 0x9fc4ff, roughness: 0.4, emissive: 0x1a3555 });
+
+/** Colored marker ring per loot type so items are easy to spot. */
+function ring(color: number) {
+  const m = new THREE.Mesh(
+    new THREE.RingGeometry(0.9, 1.15, 28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = -0.35;
+  return m;
+}
+
+/**
+ * Builds the visual for a drop.
+ * @param kind loot contents
+ * @returns group holding the item mesh and a marker ring
+ */
+function buildLootMesh(kind: LootKind): THREE.Group {
+  const g = new THREE.Group();
+  const item = new THREE.Group();
+  item.name = 'item';
+  g.add(item);
+  if (kind.type === 'weapon') {
+    const gun = buildGun(kind.cfg);
+    gun.root.scale.setScalar(1.3);
+    gun.root.rotation.set(0, 0, Math.PI / 2.4); // lying on its side
+    gun.flash.visible = false;
+    gun.flashLight.intensity = 0;
+    item.add(gun.root);
+    g.add(ring(0xffd36b));
+  } else if (kind.type === 'ammo') {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.55, 0.6), ammoMat);
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.1, 0.65), ammoLidMat);
+    lid.position.y = 0.32;
+    item.add(box, lid);
+    g.add(ring(0x9fe36b));
+  } else {
+    for (let i = 0; i < Math.min(kind.count, 3); i++) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.12, 1.0), plateMat);
+      const e = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.04, 1.04), plateEdgeMat);
+      p.position.y = i * 0.15;
+      e.position.y = i * 0.15 + 0.08;
+      item.add(p, e);
+    }
+    g.add(ring(0x6bb8ff));
+  }
+  g.traverse((o) => {
+    o.castShadow = false;
+  });
+  return g;
+}
+
+/**
+ * Owns all dropped loot: spawning, idle animation, despawning and proximity queries.
+ */
+export class Loot {
+  drops: LootDrop[] = [];
+  private uid = 0;
+
+  /** @param scene scene drops are added to */
+  constructor(private scene: THREE.Scene) {}
+
+  /**
+   * Drops an item.
+   * @param kind contents
+   * @param pos ground position (feet level)
+   * @param now time seconds
+   * @returns the new drop
+   */
+  spawn(kind: LootKind, pos: THREE.Vector3, now: number): LootDrop {
+    const mesh = buildLootMesh(kind);
+    const p = pos.clone();
+    p.y += 0.45;
+    mesh.position.copy(p);
+    this.scene.add(mesh);
+    const drop: LootDrop = { id: ++this.uid, kind, pos: p, mesh, born: now, phase: Math.random() * Math.PI * 2 };
+    this.drops.push(drop);
+    while (this.drops.length > MAX_DROPS) this.remove(this.drops[0]);
+    return drop;
+  }
+
+  /**
+   * Removes a drop from the world and frees its geometry.
+   * @param drop drop to remove
+   */
+  remove(drop: LootDrop) {
+    this.scene.remove(drop.mesh);
+    drop.mesh.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.geometry.dispose();
+    });
+    this.drops = this.drops.filter((d) => d !== drop);
+  }
+
+  /**
+   * Spins / bobs drops and removes expired ones.
+   * @param now time seconds
+   */
+  update(now: number) {
+    for (const d of [...this.drops]) {
+      const age = now - d.born;
+      if (age > LOOT_LIFETIME) {
+        this.remove(d);
+        continue;
+      }
+      const item = d.mesh.getObjectByName('item');
+      if (item) {
+        item.rotation.y = now * 1.2 + d.phase;
+        item.position.y = Math.sin(now * 2 + d.phase) * 0.12;
+      }
+      // blink during the last 5 seconds
+      d.mesh.visible = age < LOOT_LIFETIME - 5 || Math.floor(now * 6) % 2 === 0;
+    }
+  }
+
+  /**
+   * Finds the closest drop matching a filter within a radius (horizontal distance, small height tolerance).
+   * @param pos player feet position
+   * @param radius search radius
+   * @param filter which drops to consider
+   * @returns closest drop or null
+   */
+  nearest(pos: THREE.Vector3, radius: number, filter: (d: LootDrop) => boolean): LootDrop | null {
+    let best: LootDrop | null = null;
+    let bestD = radius;
+    for (const d of this.drops) {
+      if (!filter(d)) continue;
+      if (Math.abs(d.pos.y - pos.y) > 4) continue;
+      const dist = Math.hypot(d.pos.x - pos.x, d.pos.z - pos.z);
+      if (dist < bestD) {
+        bestD = dist;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  /** Removes every drop (used on dispose). */
+  clear() {
+    [...this.drops].forEach((d) => this.remove(d));
+  }
+}

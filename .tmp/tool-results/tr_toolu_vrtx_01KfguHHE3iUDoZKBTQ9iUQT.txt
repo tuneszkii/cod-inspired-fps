@@ -1,0 +1,59 @@
+stdout:
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/movement.ts:5:import type { World } from './world.js';
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/movement.ts:45:  constructor(private world: World) {}
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/movement.ts:87:    return !this.world.solids.some((s) => p.x + r > s.min.x && p.x - r < s.max.x && p.z + r > s.min.z && p.z - r < s.max.z && p.y + C.height.stand > s.min.y && p.y + 0.2 < s.max.y);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/movement.ts:235:    this.grounded = this.world.move(this.pos, this.vel, dt, C.radius, this.height, this.grounded ? C.stepHeight : 0.3);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/projectiles.ts:2:import type { World } from './world.js';
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/projectiles.ts:51:export function stepProjectile(p: Projectile, dt: number, now: number, world: World, hitBody?: (a: THREE.Vector3, b: THREE.Vector3) => boolean): boolean {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/projectiles.ts:58:    const hit = world.raycast(p.pos, dir, len + 0.25);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/loot.ts:11:/** A dropped item lying in the world. */
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/viewmodel.ts:39: * two-bone IK arms. Port of `Viewmodel.luau` + `IK.luau`. Rendered in its own scene on top of the world.
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/viewmodel.ts:60:  muzzleWorld = new THREE.Vector3();
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/viewmodel.ts:416:    this.camera.updateMatrixWorld();
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/viewmodel.ts:420:    G.root.updateMatrixWorld();
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/viewmodel.ts:422:    this.muzzleWorld.copy(G.muzzle).applyMatrix4(G.root.matrix).applyMatrix4(this.rig.matrix);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:3:import { rayAabb, type World } from './world.js';
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:146:  /** World position of the head center (for aiming at this bot). */
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:151:  /** World position of the chest. */
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:222:    world: World,
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:251:        if (!world.visible(eye, e.eye)) continue;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:314:        const sp = world.spawns[Math.floor(Math.random() * world.spawns.length)];
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:327:    world.move(this.pos, this.vel, dt, 1, this.height, 1.6);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/bot.ts:332:        const s = world.spawns[Math.floor(Math.random() * world.spawns.length)];
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:10:export interface WorldHit {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:64:export class World {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:66:  spawns: THREE.Vector3[] = [];
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:68:  readonly half = 110;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:151:    const H = this.half;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:230:      if (!this.overlaps(p.x, p.z, 2.5)) this.spawns.push(p);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:232:    this.spawns.push(new THREE.Vector3(-52, 0, -44), new THREE.Vector3(55, 0, -46), new THREE.Vector3(-55, 0, 60), new THREE.Vector3(52, 0, 54));
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:253:  raycast(o: THREE.Vector3, d: THREE.Vector3, maxDist: number): WorldHit | null {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:254:    let best: WorldHit | null = null;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:291:   * @param r horizontal half-extent
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:344:    pos.x = THREE.MathUtils.clamp(pos.x, -this.half + 1 + r, this.half - 1 - r);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/world.ts:345:    pos.z = THREE.MathUtils.clamp(pos.z, -this.half + 1 + r, this.half - 1 - r);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/gun-model.ts:177:      const half = 0.085; // half-size of the see-through window
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/gun-model.ts:181:      box(wall, half * 2 + wall * 2, depth, -half - wall / 2, sy, 0.0, darkMetal); // left wall
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/gun-model.ts:182:      box(wall, half * 2 + wall * 2, depth, half + wall / 2, sy, 0.0, darkMetal); // right wall
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/gun-model.ts:183:      box(half * 2 + wall * 2, wall, depth, 0, sy + half + wall / 2, 0.0, darkMetal); // hood
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/gun-model.ts:184:      box(half * 2 + wall * 2, wall, depth, 0, sy - half - wall / 2, 0.0, darkMetal); // bottom of the window
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/gun-model.ts:187:        new THREE.PlaneGeometry(half * 2, half * 2),
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:10:import { World } from './world.js';
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:47:  private world: World;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:204:    this.world = new World(this.scene);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:342:    let best = this.world.spawns[0];
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:344:    for (const s of this.world.spawns) {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:438:    const wall = this.world.raycast(this.camera.position, fwd, 3.9);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:517:    this.camera.updateMatrixWorld();
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:708:    const muzzleWorld = this.vm.muzzleWorld.clone().applyMatrix4(this.camera.matrixWorld);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:729:        if (i < 3) this.fx.tracer(muzzleWorld, end);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:765:    const wh = this.world.raycast(origin, dir, range);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1036:      if (!this.dead && camDist < p.radius && this.world.visible(p.pos.clone().add(new THREE.Vector3(0, 0.5, 0)), this.camera.position)) {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1047:        if (d < p.radius * 0.7 && this.world.visible(p.pos.clone().add(new THREE.Vector3(0, 0.5, 0)), b.headPos())) b.flashedUntil = now + FlashCfg.duration * (1 - d / p.radius);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1061:      if (!this.world.visible(center, b.chestPos())) continue;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1071:      if (pd < p.radius && this.world.visible(center, this.camera.position)) {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1150:    const hit = this.world.raycast(this.camera.position, dir, 160);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1156:    const lim = this.world.half - 2;
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1209:      if (!this.world.overlaps(c.x, c.z, 1.6)) {
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/game/game.ts:1348:    const wh = this.world.raycast(origin, dir, dist + 20);
+.repos/tuneszkii/cod-inspired-fps/cod-web/warzone-web/ui/touch-controls.tsx:32: * On-screen controls for phones and tablets: a virtual move stick (left), drag-to-look (right half)

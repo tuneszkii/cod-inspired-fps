@@ -1,0 +1,122 @@
+stdout:
+- running command "create"...
+- importing 1 components to get the env bitdev.react/react-env
+- successfully imported 1 components to get the env bitdev.react/react-env
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- importing 1 components to load aspects from the workspace
+- successfully imported 1 components to load aspects from the workspace
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+  installing dependencies in workspace using pnpm (teambit.dependencies/pnpm)
+- loading 1 component(s)
+- linking components
+✔ linking components (completed in 2ms)
+- loading 1 component(s)
+- loading 1 component(s)
+- deduping dependencies for installation
+✔ deduping dependencies for installation
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- deduping dependencies for installation
+✔ deduping dependencies for installation
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- running pre install subscribers
+✔ running pre install subscribers
+- running package installation using pnpm
+Progress: resolved 1, reused 0, downloaded 0, added 0
+[19C[1A4[20D[1B[1AProgress: resolved 12, reused 1, downloaded 3, added 0
+[1AProgress: resolved 18, reused 1, downloaded 11, added 0
+[19C[1A29, reused 3, downloaded 2[45D[1B[19C[1A38, reused 5, downloaded 27[46D[1B[19C[1A50, reused 7, downloaded 36[46D[1B[19C[1A73, reused 9, downloaded 53[46D[1B[1AProgress: resolved 111, reused 20, downloaded 78, added 0
+[20C[1A73, reused 51, downloaded 90[48D[1B[1AProgress: resolved 212, reused 68, downloaded 105, added 0
+[20C[1A35, reused 71, downloaded 112[49D[1BDownloading @rolldown/binding-linux-x64-gnu@1.2.14: 0.00 B/8.27 MB
+[1ADownloading @rolldown/binding-linux-x64-gnu@1.2.14: 16.38 kB/8.27 MB
+[20C[2A71, reused 88, downloaded 119[49D[2B[2AProgress: resolved 299, reused 106, downloaded 131, added 0
+[1B[2ADownloading @rolldown/binding-linux-x64-gnu@1.2.14: 8.27 MB/8.27 MB, done
+Progress: resolved 299, reused 106, downloaded 131, added 0[0K
+[19C[1A365, reused 158, downloaded 147[50D[1B[19C[1A414, reused 177, downloaded 149[50D[1BDownloading @rspack/binding-linux-x64-gnu@2.2.9: 0.00 B/20.69 MB
+[1ADownloading @rspack/binding-linux-x64-gnu@2.2.9: 16.38 kB/20.69 MB
+[20C[2A82, reused 207, downloaded 160[50D[2B[19C[2A509, reused 215, downloaded 174[50D[2B[1ADownloading @rspack/binding-linux-x64-gnu@2.2.9: 8.64 MB/20.69 MB[0K
+[20C[2A54, reused 245, downloaded 198[50D[2B[19C[2A618, reused 289, downloaded 217[50D[2B[20C[2A68, reused 330, downloaded 226[50D[2B[1ADownloading @rspack/binding-linux-x64-gnu@2.2.9: 20.20 MB/20.69 MB
+[19C[2A734, reused 383, downloaded 231[50D[2B[19C[2A802, reused 416, downloaded 24[49D[2B[2ADownloading @rspack/binding-linux-x64-gnu@2.2.9: 20.69 MB/20.69 MB, done
+Progress: resolved 802, reused 416, downloaded 241, added 0[0K
+[20C[1A60, reused 463, downloaded 253[50D[1B[19C[1A933, reused 522, downloaded 264[50D[1B[1AProgress: resolved 1007, reused 588, downloaded 274, added 0
+[21C[1A88, reused 660, downloaded 285[51D[1B[20C[1A152, reused 718, downloaded 289[51D[1B[21C[1A61, reused 726, downloaded 308[51D[1B[22C[1A8, reused 728[35D[1B[20C[1A211, reused 746, downloaded 315[51D[1B[1A WARN  7 deprecated subdependencies found: glob@10.5.0, glob@7.2.3, inflight@1.0.6, lodash-es@4.18.0, rimraf@3.0.2, uuid@10.0.0, whatwg-encoding@3.1.1
+Progress: resolved 1211, reused 746, downloaded 315, added 0
+[1AAlready up to date[0K
+Progress: resolved 1211, reused 746, downloaded 315, added 0
+[59C[1A1[60D[1B[1AProgress: resolved 1211, reused 746, downloaded 315, added 18
+[59C[1A26[61D[1B[59C[1A35[61D[1B[59C[1A42[61D[1B[59C[1A53[61D[1B[60C[1A8[61D[1B[59C[1A77[61D[1B[59C[1A8[60D[1B[59C[1A99[61D[1B[1AProgress: resolved 1211, reused 746, downloaded 315, added 109
+[60C[1A18[62D[1B[60C[1A30[62D[1B[61C[1A6[62D[1B[61C[1A8[62D[1B[60C[1A5[61D[1B[60C[1A66[62D[1B[60C[1A74[62D[1B[60C[1A92[62D[1B[59C[1A204[62D[1B[60C[1A16[62D[1B[60C[1A22[62D[1B[61C[1A4[62D[1B[60C[1A30[62D[1B[60C[1A47[62D[1B[60C[1A62[62D[1B[60C[1A79[62D[1B[59C[1A302[62D[1B[60C[1A2[61D[1B[60C[1A43[62D[1B[60C[1A66[62D[1B[60C[1A7[61D[1B[60C[1A91[62D[1B[59C[1A405[62D[1B[60C[1A23[62D[1B[60C[1A44[62D[1B[60C[1A60[62D[1B[60C[1A8[61D[1B[60C[1A9[61D[1B[59C[1A50[61D[1B[60C[1A12[62D[1B[61C[1A7[62D[1B[60C[1A30[62D[1B[60C[1A45[62D[1B[60C[1A58[62D[1B[60C[1A83[62D[1B[60C[1A98[62D[1B[59C[1A617[62D[1B[60C[1A23[62D[1B[60C[1A31[62D[1B[61C[1A5[62D[1B[60C[1A4[61D[1B[60C[1A60[62D[1B[60C[1A88[62D[1B[60C[1A94[62D[1B[59C[1A70[61D[1B[60C[1A10[62D[1B[61C[1A3[62D[1B[60C[1A32[62D[1B[60C[1A48[62D[1B[60C[1A50[62D[1B[61C[1A7[62D[1B[60C[1A7[61D[1B[59C[1A804[62D[1B[60C[1A10[62D[1B[60C[1A31[62D[1B[60C[1A56[62D[1B[60C[1A65[62D[1B[60C[1A92[62D[1B[59C[1A925[62D[1B[60C[1A69[62D[1B[60C[1A80[62D[1B[60C[1A9[61D[1B[1AProgress: resolved 1211, reused 746, downloaded 315, added 1005
+[61C[1A2[62D[1B[62C[1A9[63D[1B[61C[1A38[63D[1B[61C[1A47[63D[1B[62C[1A9[63D[1B[1AProgress: resolved 1211, reused 746, downloaded 315, added 1057, done
+node_modules/.pnpm/@parcel+watcher@2.6.0/node_modules/@parcel/watcher: Running install script...
+[1Anode_modules/.pnpm/@parcel+watcher@2.6.0/node_modules/@parcel/watcher: Running install script, done in 46ms
+
+dependencies:
++ @apollo/client 4.3.3
++ @babel/core 7.29.0 (8.0.7 is available)
++ @bitdev/react.app-types.vite-react 3.0.17
++ @mdx-js/mdx 3.1.1
++ @mdx-js/react 3.1.1
++ @rspack/core 2.2.9
++ @rspack/dev-server 2.2.1
++ @rspack/plugin-react-refresh 2.0.2
++ @teambit/mdx.ui.mdx-scope-context 1.1.1
++ @testing-library/dom 10.4.1 (10.4.2 is available)
++ @testing-library/jest-dom 6.9.1 (7.0.1 is available)
++ @types/find-root 1.1.4
++ @types/node 22.13.14 (26.6.5 is available)
++ @types/react 19.2.14 (19.3.0 is available)
++ @types/react-dom 19.2.3 (19.3.0 is available)
++ @vitejs/plugin-react 5.2.0 (6.1.2 is available)
++ @vitest/coverage-istanbul 4.1.12 (5.0.5 is available)
++ browserslist 4.28.1 (4.29.3 is available)
++ graphql 16.14.2 (17.0.2 is available)
++ jsdom 29.1.1 (30.1.3 is available)
++ oxlint 1.55.0 (1.88.0 is available)
++ oxlint-tsgolint 0.17.0 (7.0.2004 is available)
++ react 19.2.4 (19.3.1 is available)
++ react-dom 19.2.4 (19.3.1 is available)
++ react-router 7.18.4 (8.4.0 is available)
++ react-router-dom 7.18.4
++ sass 1.98.0 (1.105.1 is available)
++ sass-loader 16.0.8 (17.0.1 is available)
++ vite 8.3.4
++ vitest 4.1.12 (5.0.5 is available)
+
+devDependencies:
++ @bitdev/react.react-env 6.0.33 (6.0.34 is available)
+✔ done running package installation using pnpm (completed in 25s)
+- running post install subscribers
+✔ running post install subscribers
+- loading 1 component(s)
+- loading 1 component(s)
+- compiling components
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+✔ compiling components (completed in 273ms)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+- loading 1 component(s)
+✔ 1 component(s) were created
+
+   › tuneszkiiii32.cod-web/warzone-web
+      location: cod-web/warzone-web
+      env:      bitdev.react/react-env@6.0.33 (set by --env flag)
+      package:  @tuneszkiiii32/cod-web.warzone-web
+
+env configuration is according to workspace variants, template config or --env flag.

@@ -1,0 +1,392 @@
+import * as THREE from 'three';
+import { ArmorCfg, HealthCfg, Weapons, damageAt, type WeaponCfg } from './config.js';
+import { rayAabb, type World } from './world.js';
+import { buildGun } from './gun-model.js';
+
+/** Bot / player body hit region. */
+export type HitPart = 'Head' | 'Torso' | 'Limb';
+
+const BOT_NAMES = ['Ghost', 'Price', 'Soap', 'Gaz', 'Nikolai', 'Farah', 'Roach', 'Bale', 'Krueger', 'Mara', 'Otter', 'Zane', 'Iskra', 'Wyatt'];
+/** Distance (studs) at which a bot switches from shooting to knifing. */
+const BOT_MELEE_RANGE = 6;
+/** Seconds between bot knife swings. */
+const BOT_MELEE_COOLDOWN = 1.1;
+const BOT_WEAPONS = ['M4A1', 'AK47', 'MP5', 'Grau', 'UZI', 'P90', 'Model680', 'MK14', 'PKM'];
+
+const skin = new THREE.MeshStandardMaterial({ color: 0xc8a07e, roughness: 0.8 });
+const pants = new THREE.MeshStandardMaterial({ color: 0x34362f, roughness: 0.9 });
+const boots = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.9 });
+const vestMat = new THREE.MeshStandardMaterial({ color: 0x22261f, roughness: 0.85 });
+
+/**
+ * AI-controlled combatant (stand-in for other players, since this port has no server).
+ * Free-for-all: targets the nearest visible enemy — the player or another bot.
+ */
+export class Bot {
+  id: number;
+  name: string;
+  group = new THREE.Group();
+  pos = new THREE.Vector3();
+  vel = new THREE.Vector3();
+  yaw = 0;
+  health = HealthCfg.max;
+  armor = ArmorCfg.startArmor;
+  alive = true;
+  respawnAt = 0;
+  lastHurt = -99;
+  weapon: WeaponCfg;
+  ammo: number;
+  reloadUntil = 0;
+  nextShot = 0;
+  burstLeft = 0;
+  target: { pos: THREE.Vector3; isPlayer: boolean; bot?: Bot } | null = null;
+  reactAt = 0;
+  waypoint = new THREE.Vector3();
+  strafeDir = 1;
+  strafeSwitch = 0;
+  crouch = false;
+  kills = 0;
+  deaths = 0;
+  streak = 0;
+  lastAttacker: number | null = null; // bot id, or -1 for player
+  flashedUntil = 0;
+  /** Earliest time the bot can knife again. */
+  meleeNext = 0;
+  /** Remaining seconds of the knife swing animation. */
+  private meleeAnim = 0;
+  private torso: THREE.Mesh;
+  private head: THREE.Mesh;
+  private legL: THREE.Mesh;
+  private legR: THREE.Mesh;
+  private gunPivot = new THREE.Group();
+  private walkT = 0;
+  private hitFlash = 0;
+  private bodyMat: THREE.MeshStandardMaterial;
+
+  /**
+   * @param id unique id
+   * @param scene scene to add the body to
+   */
+  constructor(id: number, scene: THREE.Scene) {
+    this.id = id;
+    this.name = BOT_NAMES[id % BOT_NAMES.length] + (id >= BOT_NAMES.length ? `_${id}` : '');
+    this.weapon = Weapons[BOT_WEAPONS[id % BOT_WEAPONS.length]];
+    this.ammo = this.weapon.mag;
+    const hue = (id * 0.13) % 1;
+    this.bodyMat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.22 + hue * 0.12, 0.25, 0.28), roughness: 0.85 });
+    const mk = (g: THREE.BufferGeometry, m: THREE.Material, y: number, parent: THREE.Object3D = this.group) => {
+      const mesh = new THREE.Mesh(g, m);
+      mesh.position.y = y;
+      mesh.castShadow = true;
+      parent.add(mesh);
+      return mesh;
+    };
+    this.legL = mk(new THREE.BoxGeometry(0.9, 2, 0.9), pants, 1);
+    this.legL.position.x = -0.5;
+    this.legR = mk(new THREE.BoxGeometry(0.9, 2, 0.9), pants, 1);
+    this.legR.position.x = 0.5;
+    [this.legL, this.legR].forEach((l) => {
+      l.geometry.translate(0, -1, 0);
+      l.position.y = 2;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.35, 1.1), boots);
+      b.position.set(0, -1.85, -0.08);
+      l.add(b);
+    });
+    this.torso = mk(new THREE.BoxGeometry(2, 2, 1), this.bodyMat, 3);
+    const vest = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.5, 1.15), vestMat);
+    vest.position.y = 0.1;
+    this.torso.add(vest);
+    this.head = mk(new THREE.BoxGeometry(1, 1, 1), skin, 4.5);
+    const helmet = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.45, 1.15), vestMat);
+    helmet.position.y = 0.4;
+    this.head.add(helmet);
+    // arms holding gun
+    this.gunPivot.position.set(0, 3.5, 0);
+    this.group.add(this.gunPivot);
+    const g = buildGun(this.weapon);
+    g.root.scale.setScalar(1.3);
+    g.root.position.set(0.45, -0.25, -1.0);
+    this.gunPivot.add(g.root);
+    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 1.5), this.bodyMat);
+    armR.position.set(0.85, -0.3, -0.5);
+    armR.rotation.y = 0.3;
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 1.8), this.bodyMat);
+    armL.position.set(-0.3, -0.35, -1.0);
+    armL.rotation.y = -0.6;
+    this.gunPivot.add(armR, armL);
+    scene.add(this.group);
+  }
+
+  /**
+   * Spawns the bot.
+   * @param p spawn position
+   * @param now time seconds
+   */
+  spawn(p: THREE.Vector3, now: number) {
+    this.pos.copy(p);
+    this.vel.set(0, 0, 0);
+    this.health = HealthCfg.max;
+    this.armor = ArmorCfg.startArmor * (0.3 + Math.random() * 0.7);
+    this.armor = Math.round(this.armor / 50) * 50;
+    this.alive = true;
+    this.ammo = this.weapon.mag;
+    this.target = null;
+    this.group.visible = true;
+    this.group.rotation.set(0, 0, 0);
+    this.waypoint.copy(p);
+    this.reactAt = now;
+    this.streak = 0;
+  }
+
+  /** Feet-to-head height (crouch lowers the torso). */
+  get height() {
+    return this.crouch ? 4 : 5;
+  }
+
+  /** World position of the head center (for aiming at this bot). */
+  headPos() {
+    return this.pos.clone().add(new THREE.Vector3(0, this.crouch ? 3.6 : 4.5, 0));
+  }
+
+  /** World position of the chest. */
+  chestPos() {
+    return this.pos.clone().add(new THREE.Vector3(0, this.crouch ? 2.3 : 3, 0));
+  }
+
+  /**
+   * Ray test against the bot's hitboxes.
+   * @param o ray origin
+   * @param d normalized direction
+   * @param maxDist max distance
+   * @returns closest hit or null
+   */
+  raycast(o: THREE.Vector3, d: THREE.Vector3, maxDist: number): { dist: number; part: HitPart } | null {
+    if (!this.alive) return null;
+    const p = this.pos;
+    const c = this.crouch ? 1 : 0;
+    const boxes: [HitPart, THREE.Vector3, THREE.Vector3][] = [
+      ['Head', new THREE.Vector3(p.x - 0.55, p.y + 4 - c * 0.9, p.z - 0.55), new THREE.Vector3(p.x + 0.55, p.y + 5.05 - c * 0.9, p.z + 0.55)],
+      ['Torso', new THREE.Vector3(p.x - 1, p.y + 2 - c * 0.7, p.z - 0.6), new THREE.Vector3(p.x + 1, p.y + 4 - c * 0.9, p.z + 0.6)],
+      ['Limb', new THREE.Vector3(p.x - 1, p.y, p.z - 0.6), new THREE.Vector3(p.x + 1, p.y + 2 - c * 0.7, p.z + 0.6)],
+    ];
+    let best: { dist: number; part: HitPart } | null = null;
+    let bestT = maxDist;
+    for (const [part, mn, mx] of boxes) {
+      const h = rayAabb(o, d, mn, mx, bestT);
+      if (h && h.t < bestT) {
+        bestT = h.t;
+        best = { dist: h.t, part };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Applies damage (armor first, overflow to health — Warzone plate rules).
+   * @param amount raw damage
+   * @param now time seconds
+   * @returns details about the hit
+   */
+  damage(amount: number, now: number) {
+    const hadArmor = this.armor > 0;
+    const soak = Math.min(this.armor, amount);
+    this.armor -= soak;
+    this.health -= amount - soak;
+    this.lastHurt = now;
+    this.hitFlash = 0.12;
+    const killed = this.health <= 0;
+    if (killed) this.die(now);
+    return { killed, armorBroke: hadArmor && this.armor <= 0, armorHit: soak > 0 };
+  }
+
+  private die(now: number) {
+    this.alive = false;
+    this.health = 0;
+    this.deaths++;
+    this.streak = 0;
+    this.respawnAt = now + 4;
+  }
+
+  /**
+   * AI tick.
+   * @param dt delta seconds
+   * @param now time seconds
+   * @param world collision world
+   * @param enemies candidate targets
+   * @param shoot callback used when the bot fires
+   * @param melee callback used when the bot knifes an enemy that got too close
+   */
+  update(
+    dt: number,
+    now: number,
+    world: World,
+    enemies: { pos: THREE.Vector3; eye: THREE.Vector3; isPlayer: boolean; bot?: Bot; alive: boolean }[],
+    shoot: (bot: Bot, origin: THREE.Vector3, target: THREE.Vector3, isPlayer: boolean, targetBot?: Bot) => void,
+    melee?: (bot: Bot, isPlayer: boolean, targetBot?: Bot) => void
+  ) {
+    if (!this.alive) {
+      // death fall
+      this.group.rotation.x = Math.max(this.group.rotation.x - dt * 5, -Math.PI / 2);
+      this.group.position.y = Math.max(this.group.position.y - dt * 2, this.pos.y + 0.5);
+      return;
+    }
+    // regen
+    if (now - this.lastHurt > HealthCfg.regenDelay) this.health = Math.min(HealthCfg.max, this.health + HealthCfg.regenRate * dt);
+    const flashed = now < this.flashedUntil;
+
+    // target acquisition
+    const eye = this.headPos();
+    let best: (typeof enemies)[number] | null = null;
+    // see farther on big maps so long sightlines actually matter
+    let bestD = world.half > 150 ? 220 : 160;
+    if (!flashed) {
+      for (const e of enemies) {
+        if (!e.alive || e.bot === this) continue;
+        const dd = e.pos.distanceTo(this.pos);
+        if (dd > bestD) continue;
+        // field of view check (wide) unless very close or recently attacked by them
+        const toE = e.pos.clone().sub(this.pos).setY(0).normalize();
+        const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        const attacker = (e.isPlayer && this.lastAttacker === -1) || (e.bot && this.lastAttacker === e.bot.id);
+        if (fwd.dot(toE) < -0.2 && dd > 15 && !(attacker && now - this.lastHurt < 2)) continue;
+        if (!world.visible(eye, e.eye)) continue;
+        best = e;
+        bestD = dd;
+      }
+    }
+    if (best) {
+      if (!this.target || this.target.bot !== best.bot || this.target.isPlayer !== best.isPlayer) this.reactAt = now + 0.35 + Math.random() * 0.35;
+      this.target = { pos: best.eye.clone(), isPlayer: best.isPlayer, bot: best.bot };
+    } else this.target = null;
+
+    // movement
+    const speed = this.target ? 9 : 11;
+    let moveDir = new THREE.Vector3();
+    if (this.target) {
+      const to = this.target.pos.clone().sub(this.pos).setY(0);
+      const dist = to.length();
+      to.normalize();
+      const desiredYaw = Math.atan2(-to.x, -to.z);
+      this.yaw = lerpAngle(this.yaw, desiredYaw, 1 - Math.exp(-10 * dt));
+      if (now > this.strafeSwitch) {
+        this.strafeDir = Math.random() > 0.5 ? 1 : -1;
+        this.strafeSwitch = now + 0.6 + Math.random() * 1.2;
+        this.crouch = Math.random() < 0.25;
+      }
+      const right = new THREE.Vector3(-to.z, 0, to.x);
+      moveDir = right.multiplyScalar(this.strafeDir);
+      const ideal = this.weapon.cls === 'Shotgun' || this.weapon.cls === 'SMG' ? 20 : 45;
+      if (dist > ideal) moveDir.add(to.clone().multiplyScalar(0.8));
+      else if (dist < ideal * 0.4) moveDir.add(to.clone().multiplyScalar(-0.6));
+      moveDir.normalize();
+
+      // knife anything that gets too close instead of shooting it
+      const close = dist < BOT_MELEE_RANGE && Math.abs(this.target.pos.y - (this.pos.y + 3.5)) < 4;
+      if (close && melee && now > this.reactAt && now > this.meleeNext) {
+        this.meleeNext = now + BOT_MELEE_COOLDOWN;
+        this.meleeAnim = 0.3;
+        this.nextShot = Math.max(this.nextShot, now + 0.4);
+        melee(this, this.target.isPlayer, this.target.bot);
+      }
+
+      // shooting
+      if (!close && now > this.reloadUntil && now > this.reactAt && now > this.nextShot) {
+        if (this.ammo <= 0) {
+          this.reloadUntil = now + this.weapon.reloadEmptyTime * 1.1;
+          this.ammo = this.weapon.mag;
+        } else {
+          if (this.burstLeft <= 0) this.burstLeft = this.weapon.fireMode === 'Auto' ? 3 + Math.floor(Math.random() * 6) : 1;
+          const muzzle = this.pos.clone().add(new THREE.Vector3(0, this.crouch ? 2.8 : 3.4, 0)).addScaledVector(to, 1.6);
+          shoot(this, muzzle, this.target.pos, this.target.isPlayer, this.target.bot);
+          this.ammo--;
+          this.burstLeft--;
+          const interval = 60 / this.weapon.rpm;
+          this.nextShot = now + (this.burstLeft > 0 ? interval * 1.15 : interval + 0.35 + Math.random() * 0.5);
+        }
+      }
+    } else {
+      this.crouch = false;
+      if (this.ammo < this.weapon.mag * 0.5 && now > this.reloadUntil) {
+        this.reloadUntil = now + this.weapon.reloadTime;
+        this.ammo = this.weapon.mag;
+      }
+      const to = this.waypoint.clone().sub(this.pos).setY(0);
+      if (to.length() < 3 || Math.random() < 0.002) {
+        // roam: usually toward a nearby point of interest so fights cluster on big maps
+        const near = world.spawns.filter((s) => s.y < 0.5 && s.distanceTo(this.pos) < 120);
+        const pool = near.length > 2 && Math.random() < 0.75 ? near : world.spawns;
+        const sp = pool[Math.floor(Math.random() * pool.length)];
+        this.waypoint.set(sp.x + (Math.random() - 0.5) * 30, 0, sp.z + (Math.random() - 0.5) * 30);
+      } else {
+        to.normalize();
+        moveDir = to;
+        this.yaw = lerpAngle(this.yaw, Math.atan2(-to.x, -to.z), 1 - Math.exp(-5 * dt));
+      }
+    }
+    const sp = this.crouch ? speed * 0.5 : speed;
+    this.vel.x += (moveDir.x * sp - this.vel.x) * (1 - Math.exp(-10 * dt));
+    this.vel.z += (moveDir.z * sp - this.vel.z) * (1 - Math.exp(-10 * dt));
+    this.vel.y -= 196.2 * dt;
+    const before = this.pos.clone();
+    world.move(this.pos, this.vel, dt, 1, this.height, 1.6);
+    // stuck -> new waypoint / jump
+    if (moveDir.lengthSq() > 0 && before.distanceTo(this.pos) < sp * dt * 0.2) {
+      this.strafeDir *= -1;
+      if (!this.target) {
+        const s = world.spawns[Math.floor(Math.random() * world.spawns.length)];
+        this.waypoint.copy(s);
+      }
+    }
+
+    // animation
+    this.group.position.copy(this.pos);
+    this.group.rotation.y = this.yaw;
+    const hs = Math.hypot(this.vel.x, this.vel.z);
+    this.walkT += dt * hs * 0.5;
+    const swing = Math.sin(this.walkT) * Math.min(hs / 10, 1) * 0.7;
+    this.legL.rotation.x = swing;
+    this.legR.rotation.x = -swing;
+    const c = this.crouch ? 1 : 0;
+    this.torso.position.y = 3 - c * 0.8;
+    this.head.position.y = 4.5 - c * 0.9;
+    this.gunPivot.position.y = 3.5 - c * 0.85;
+    this.legL.position.y = this.legR.position.y = 2 - c * 0.6;
+    if (this.target) {
+      const dy = this.target.pos.y - (this.pos.y + 3.5);
+      const dh = this.target.pos.clone().setY(0).distanceTo(this.pos.clone().setY(0));
+      this.gunPivot.rotation.x = Math.atan2(dy, dh);
+    } else this.gunPivot.rotation.x = -0.35;
+    if (this.meleeAnim > 0) {
+      this.meleeAnim -= dt;
+      // quick downward chop of the gun arm
+      this.gunPivot.rotation.x += Math.sin(Math.PI * (1 - Math.max(this.meleeAnim, 0) / 0.3)) * 0.9;
+    }
+    if (this.hitFlash > 0) {
+      this.hitFlash -= dt;
+      this.bodyMat.emissive.setRGB(this.hitFlash > 0 ? 0.6 : 0, 0, 0);
+    }
+  }
+}
+
+/**
+ * Interpolates between two angles along the shortest arc.
+ * @param a from (radians)
+ * @param b to (radians)
+ * @param t alpha
+ * @returns interpolated angle
+ */
+export function lerpAngle(a: number, b: number, t: number) {
+  let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
+}
+
+/**
+ * Damage dealt by a bot shot at a distance (bots use the same falloff tables).
+ * @param w weapon
+ * @param dist distance
+ * @returns damage
+ */
+export function botDamage(w: WeaponCfg, dist: number) {
+  return damageAt(w.damage, dist) * (w.cls === 'Shotgun' ? 4 : 1);
+}

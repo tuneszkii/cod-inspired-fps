@@ -1,0 +1,172 @@
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: 'Rajdhani', 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  color: #f2f2ec;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  user-select: none;
+  overflow: hidden;
+}
+
+/* crosshair */
+.cross { position: absolute; left: 50%; top: 50%; transition: opacity 0.08s; }
+.ch, .cv { position: absolute; left: 0; top: 0; background: var(--reticle, #fff); box-shadow: 0 0 2px #000; transition: transform 0.05s linear; }
+.ch { width: 10px; height: 2px; }
+.cv { width: 2px; height: 10px; }
+.dot { position: absolute; width: 2px; height: 2px; background: var(--reticle, #fff); transform: translate(-50%, -50%); }
+
+.hit { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.hit span { position: absolute; width: 11px; height: 2px; background: #fff; box-shadow: 0 0 2px #000; }
+.hit span:nth-child(1) { transform: translate(-16px, -12px) rotate(45deg); }
+.hit span:nth-child(2) { transform: translate(5px, -12px) rotate(-45deg); }
+.hit span:nth-child(3) { transform: translate(-16px, 10px) rotate(-45deg); }
+.hit span:nth-child(4) { transform: translate(5px, 10px) rotate(45deg); }
+.hitHead span { background: #ffd34d; }
+.hitKill span { background: #ff3b30; width: 14px; height: 3px; }
+
+.dmgDir { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.dmgArc {
+  position: absolute; left: -60px; top: -170px; width: 120px; height: 30px;
+  border-top: 6px solid rgba(220, 30, 30, 0.85); border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+}
+
+/* radar */
+.radar {
+  position: absolute; left: 20px; top: 20px; width: clamp(110px, 14vw, 170px); aspect-ratio: 1;
+  background: radial-gradient(circle, rgba(40, 50, 40, 0.65), rgba(10, 14, 10, 0.75));
+  border: 2px solid rgba(255, 255, 255, 0.25); border-radius: 6px; overflow: hidden;
+}
+.radar::before, .radar::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.08); }
+.radar::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+.radar::after { top: 50%; left: 0; right: 0; height: 1px; }
+.radarSweep {
+  position: absolute; inset: -50%;
+  background: conic-gradient(from 0deg, rgba(120, 255, 120, 0.18), transparent 25%);
+  animation: sweep 2.5s linear infinite;
+}
+@keyframes sweep { to { transform: rotate(360deg); } }
+.radarMe {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: translate(-50%, -60%);
+  border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid #ffd34d;
+}
+.radarDot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #ff3b30; transform: translate(-50%, -50%); box-shadow: 0 0 6px #ff3b30; }
+.radarN { position: absolute; top: 2px; left: 50%; transform: translateX(-50%); font-size: 11px; opacity: 0.6; }
+
+/* top score */
+.topScore { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); text-align: center; }
+.mode { font-size: 12px; letter-spacing: 3px; opacity: 0.7; }
+.kd { font-size: 20px; font-weight: 600; background: rgba(0, 0, 0, 0.35); padding: 3px 14px; margin-top: 4px; }
+.kd small { font-size: 11px; opacity: 0.7; letter-spacing: 1px; }
+.sep { opacity: 0.4; margin: 0 6px; }
+.streak { color: #ffd34d; }
+
+/* feed */
+.feed { position: absolute; top: 18px; right: 20px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 15px; }
+.feedRow { background: rgba(0, 0, 0, 0.4); padding: 3px 10px; display: flex; gap: 8px; animation: slideIn 0.2s ease-out; }
+.feedWeapon { opacity: 0.75; font-size: 13px; }
+.you { color: #7fd0ff; font-weight: 700; }
+.enemy { color: #ff7a6e; font-weight: 600; }
+.hs { color: #ffd34d; }
+@keyframes slideIn { from { transform: translateX(30px); opacity: 0; } }
+
+/* popups */
+.uavTag { position: absolute; left: 6px; bottom: 4px; font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #4fd8ff; text-shadow: 0 0 6px #4fd8ff; }
+.streakTray { position: absolute; left: 20px; top: calc(32px + clamp(110px, 14vw, 170px)); display: flex; flex-direction: column; gap: 4px; width: clamp(110px, 14vw, 170px); }
+.streakCard {
+  display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 14px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.55); border-left: 3px solid var(--streak); animation: streakIn 0.35s ease-out;
+}
+.streakCard kbd { font-family: inherit; font-size: 11px; padding: 0 5px; color: #111; background: var(--streak); }
+.streakNext { display: flex; flex-direction: column; font-size: 11px; letter-spacing: 1px; opacity: 0.85; padding: 2px 4px; }
+.streakNext b { color: var(--streak); }
+.streakNext small { font-size: 11px; opacity: 0.75; }
+@keyframes streakIn { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.popups { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.popup { font-size: 16px; font-weight: 700; letter-spacing: 1px; animation: pop 2.2s ease-out forwards; }
+.popup b { color: #ffd34d; margin-left: 6px; }
+@keyframes pop { 0% { transform: scale(1.4); opacity: 0; } 10% { transform: scale(1); opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
+
+.medal { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; animation: medal 1.8s ease-out forwards; }
+.medalIcon { font-size: 54px; color: #ffd34d; filter: drop-shadow(0 0 12px rgba(255, 200, 60, 0.7)); }
+.medalLabel { font-size: 26px; font-weight: 800; letter-spacing: 3px; }
+.medalXp { font-size: 16px; color: #ffd34d; }
+@keyframes medal { 0% { transform: translateX(-50%) scale(2); opacity: 0; } 12% { transform: translateX(-50%) scale(1); opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+
+/* plate / cook */
+.plateBar { position: absolute; left: 50%; top: 64%; transform: translateX(-50%); width: min(260px, 60vw); text-align: center; }
+.plateLabel { font-size: 13px; letter-spacing: 2px; margin-bottom: 4px; }
+.barTrack { height: 6px; background: rgba(0, 0, 0, 0.5); }
+.barFill { height: 100%; background: #7fd0ff; }
+.cook { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; transform: translate(-50%, -50%); }
+.cookTrack { fill: none; stroke: rgba(0, 0, 0, 0.4); stroke-width: 3; }
+.cookFill { fill: none; stroke: #ff3b30; stroke-width: 3; stroke-dasharray: 100.5; transform: rotate(-90deg); transform-origin: center; }
+
+/* vitals */
+.vitals { position: absolute; left: 20px; bottom: 20px; width: clamp(180px, 22vw, 280px); }
+.plates { display: flex; gap: 4px; margin-bottom: 4px; }
+.plateSeg { flex: 1; height: 8px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.15); }
+.plateSeg div { height: 100%; background: #7fd0ff; transition: width 0.15s; }
+.healthTrack { height: 8px; background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.15); }
+.healthFill { height: 100%; background: #f2f2ec; transition: width 0.15s; }
+.vitalsRow { display: flex; justify-content: space-between; margin-top: 6px; font-size: 14px; font-weight: 600; }
+.vitalsRow small { font-size: 10px; opacity: 0.6; }
+.plateCount { color: #7fd0ff; }
+.level { color: #ffd34d; }
+.xpTrack { height: 3px; background: rgba(0, 0, 0, 0.5); margin-top: 4px; }
+.xpTrack div { height: 100%; background: #ffd34d; }
+
+/* weapon */
+.weapon { position: absolute; right: 24px; bottom: 20px; text-align: right; }
+.equip { display: flex; gap: 14px; justify-content: flex-end; font-size: 16px; font-weight: 600; }
+.equip small { font-size: 10px; opacity: 0.6; }
+.dim { opacity: 0.35; }
+.ammoRow { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; line-height: 1; margin-top: 4px; }
+.ammo { font-size: clamp(36px, 5vw, 54px); font-weight: 700; }
+.low { color: #ff3b30; }
+.reserve { font-size: 20px; opacity: 0.65; }
+.weaponName { font-size: 18px; font-weight: 700; letter-spacing: 2px; }
+.slots { display: flex; gap: 10px; justify-content: flex-end; font-size: 12px; opacity: 0.55; }
+.slotActive { opacity: 1; color: #ffd34d; }
+.reload { margin-top: 6px; font-size: 14px; letter-spacing: 2px; color: #ffd34d; }
+
+.tac { position: absolute; left: 50%; bottom: 22%; transform: translateX(-50%); font-size: 12px; letter-spacing: 3px; color: #7fd0ff; opacity: 0.8; }
+.fps { position: absolute; right: 8px; bottom: 4px; font-size: 10px; opacity: 0.35; }
+
+.hurt { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 0, 0, 0.75)); transition: opacity 0.1s; }
+.flash { position: absolute; inset: 0; background: #fff; }
+
+/* scope */
+.scope { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 0, transparent min(38vh, 38vw), #000 calc(min(38vh, 38vw) + 2px)); }
+.scopeLens { position: absolute; left: 50%; top: 50%; width: min(76vh, 76vw); aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.8); }
+.scopeH { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: #000; }
+.scopeV { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #000; }
+.scopeH::before, .scopeH::after { content: ''; position: absolute; top: -2px; height: 5px; width: 40%; background: #000; }
+.scopeH::before { left: 0; }
+.scopeH::after { right: 0; }
+.scopeDot { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; background: #ff2020; border-radius: 50%; transform: translate(-50%, -50%); }
+.breathHint { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); font-size: 13px; letter-spacing: 2px; opacity: 0.8; }
+
+/* loot */
+.pickupPrompt { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); padding: 6px 14px; background: rgba(10, 12, 10, 0.6); border: 1px solid rgba(255, 211, 107, 0.6); font-size: 15px; font-weight: 700; letter-spacing: 2px; white-space: nowrap; }
+.pickupKey { display: inline-block; min-width: 20px; padding: 0 5px; margin-right: 6px; border: 1px solid currentColor; border-radius: 3px; text-align: center; color: #ffd36b; }
+.lootToast { position: absolute; left: 50%; top: 68%; transform: translateX(-50%); font-size: 15px; font-weight: 700; letter-spacing: 2px; color: #b8e68a; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); white-space: nowrap; }
+
+/* death */
+.death { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(60, 0, 0, 0.35); }
+.deathTitle { font-size: 16px; letter-spacing: 6px; opacity: 0.8; }
+.deathName { font-size: clamp(32px, 6vw, 56px); font-weight: 800; color: #ff7a6e; }
+.deathTimer { font-size: 16px; opacity: 0.8; margin-top: 8px; }
+
+/* scoreboard */
+.board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, 92vw); background: rgba(10, 12, 10, 0.85); border: 1px solid rgba(255, 255, 255, 0.15); padding: 12px; }
+.boardHead, .boardRow { display: grid; grid-template-columns: 1fr 50px 50px 60px; padding: 6px 10px; font-size: 15px; }
+.boardHead { font-size: 12px; letter-spacing: 2px; opacity: 0.6; border-bottom: 1px solid rgba(255, 255, 255, 0.15); }
+.boardRow:nth-child(odd) { background: rgba(255, 255, 255, 0.04); }
+.boardMe { color: #7fd0ff; font-weight: 700; }
+
+@media (max-width: 767px) {
+  .feed { font-size: 12px; top: 70px; }
+  .kd { font-size: 15px; }
+  .weaponName { font-size: 14px; }
+}

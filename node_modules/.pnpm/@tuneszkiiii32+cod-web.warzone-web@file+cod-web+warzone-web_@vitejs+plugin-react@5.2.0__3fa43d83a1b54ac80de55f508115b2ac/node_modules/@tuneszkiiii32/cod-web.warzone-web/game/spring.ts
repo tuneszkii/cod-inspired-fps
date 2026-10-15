@@ -1,0 +1,73 @@
+import { Vector3 } from 'three';
+
+/**
+ * Damped Vector3 spring (port of `Spring.luau`). Use `.position.x` for scalar springs.
+ * speed = natural frequency (rad/s), ratio = damping ratio (1 = critical, < 1 = bouncy).
+ */
+export class Spring {
+  position: Vector3;
+  velocity = new Vector3();
+  target: Vector3;
+  private acc = new Vector3();
+  private tmp = new Vector3();
+
+  /**
+   * @param speed natural frequency in rad/s
+   * @param ratio damping ratio
+   * @param initial starting position
+   */
+  constructor(public speed: number, public ratio: number, initial?: Vector3) {
+    this.position = initial ? initial.clone() : new Vector3();
+    this.target = this.position.clone();
+  }
+
+  /**
+   * Adds an instantaneous velocity kick.
+   * @param v velocity to add
+   */
+  impulse(v: Vector3) {
+    this.velocity.add(v);
+  }
+
+  /**
+   * Steps the spring (4 sub-steps, dt clamped to 1/20 s).
+   * @param dt frame delta in seconds
+   * @returns the current position
+   */
+  update(dt: number): Vector3 {
+    dt = Math.min(dt, 1 / 20);
+    const steps = 4;
+    const h = dt / steps;
+    const k = this.speed * this.speed;
+    const d = 2 * this.ratio * this.speed;
+    for (let i = 0; i < steps; i++) {
+      this.acc.copy(this.target).sub(this.position).multiplyScalar(k).sub(this.tmp.copy(this.velocity).multiplyScalar(d));
+      this.velocity.addScaledVector(this.acc, h);
+      this.position.addScaledVector(this.velocity, h);
+    }
+    return this.position;
+  }
+}
+
+/**
+ * Frame-rate independent exponential smoothing.
+ * @param cur current value
+ * @param target target value
+ * @param rate smoothing rate
+ * @param dt delta seconds
+ * @returns the smoothed value
+ */
+export function smooth(cur: number, target: number, rate: number, dt: number): number {
+  return cur + (target - cur) * (1 - Math.exp(-rate * dt));
+}
+
+/**
+ * Moves `cur` toward `target` by at most `step`.
+ * @param cur current value
+ * @param target target value
+ * @param step maximum change
+ * @returns the new value
+ */
+export function approach(cur: number, target: number, step: number): number {
+  return cur < target ? Math.min(cur + step, target) : Math.max(cur - step, target);
+}

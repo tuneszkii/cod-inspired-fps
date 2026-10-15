@@ -1,0 +1,100 @@
+import { mulberry32 } from '../world.js';
+import type { MapDef } from './map-types.js';
+import { building, car, crates, perimeter, sandbags, streetLamp, tree } from './prefabs.js';
+
+/**
+ * Downtown: a dusk-lit city grid. Three-to-five story buildings you can climb and fight through,
+ * streets full of wrecked cars and barricades, and a central park with trees.
+ */
+export const Downtown: MapDef = {
+  id: 'downtown',
+  name: 'DOWNTOWN',
+  size: 'LARGE',
+  desc: 'Dusk over a city grid. Climb towers, hold rooftops, fight street to street.',
+  half: 220,
+  recommendedBots: 10,
+  atmosphere: {
+    sky: 0x5a4a5e, fogNear: 0.3, hemiSky: 0xb39cc4, hemiGround: 0x3a3030, hemiIntensity: 0.9,
+    sunColor: 0xff9a5a, sunIntensity: 2.0, sunDir: [-140, 70, -40],
+  },
+  build: (w) => {
+    const M = w.mats;
+    const H = w.half;
+    const rand = mulberry32(777);
+    w.flat(0, 0, H * 2 + 600, H * 2 + 600, M.darkConcrete, 0);
+    perimeter(w, 20, M.redBrick);
+
+    // grid: blocks of 80, streets 20 wide
+    const block = 80;
+    const street = 20;
+    const pitch = block + street;
+    const centers = [-pitch * 2 + 10, -pitch + 10, 10, pitch + 10].map((c) => c - 10);
+    for (const c of [-150, -50, 50, 150]) {
+      w.flat(c, 0, street, H * 2, M.road, 0.02);
+      w.flat(0, c, H * 2, street, M.road, 0.025);
+      for (let i = -10; i <= 10; i++) {
+        w.flat(c, i * 20, 0.6, 6, M.line, 0.04);
+        w.flat(i * 20, c, 6, 0.6, M.line, 0.045);
+      }
+    }
+    void centers;
+
+    // blocks at -100, 0, 100 (+ edge half-blocks at ±200)
+    const blocks = [-100, 0, 100];
+    const wallMats = [M.brick, M.redBrick, M.plaster, M.concrete];
+    for (const bx of blocks) {
+      for (const bz of blocks) {
+        if (bx === 0 && bz === 0) {
+          // central park
+          w.flat(0, 0, block, block, M.grass, 0.03);
+          w.box(0, 0, 0, 12, 2, 12, M.concrete);
+          w.box(0, 2, 0, 3, 8, 3, M.concrete);
+          for (let i = 0; i < 14; i++) {
+            const a = (i / 14) * Math.PI * 2;
+            tree(w, Math.cos(a) * 28, Math.sin(a) * 28, 1.1);
+          }
+          sandbags(w, -16, -20, 16, -20);
+          sandbags(w, -16, 20, 16, 20);
+          continue;
+        }
+        // two buildings per block with an alley between them
+        const tall = Math.abs(bx) + Math.abs(bz) <= 100;
+        const floors = tall ? 4 + Math.floor(rand() * 2) : 3;
+        const wm = wallMats[Math.floor(rand() * wallMats.length)];
+        const wm2 = wallMats[Math.floor(rand() * wallMats.length)];
+        building(w, bx - 18, bz - 16, 36, 40, { floors, wallMat: wm, windowMat: M.litWindow, roofAccess: true });
+        building(w, bx + 22, bz + 14, 30, 36, { floors: Math.max(2, floors - 1), wallMat: wm2, windowMat: M.litWindow, roofAccess: true });
+        // alley clutter
+        crates(w, bx + 22, bz - 26, true);
+        w.box(bx - 20, 0, bz + 28, 6, 4, 3, M.darkMetal); // dumpster
+      }
+    }
+    // edge rows of shops (single floor, rooftops reachable by stairs)
+    for (const e of [-200, 200]) {
+      for (const t of [-100, 0, 100]) {
+        building(w, t, e + (e > 0 ? -8 : 8), 40, 22, { floors: 1, floorH: 9, wallMat: M.plaster, windowMat: M.litWindow, roofAccess: true, doors: [e > 0 ? 'n' : 's'] });
+        building(w, e + (e > 0 ? -8 : 8), t, 22, 40, { floors: 1, floorH: 9, wallMat: M.brick, windowMat: M.litWindow, roofAccess: true, doors: [e > 0 ? 'w' : 'e'] });
+      }
+    }
+
+    // wrecked cars, barricades and lamps on the streets
+    const carColors = [0x6b2b2b, 0x2b3f6b, 0xb8b2a4, 0x2a2a2a, 0x7a6a3a];
+    for (const c of [-150, -50, 50, 150]) {
+      for (let i = 0; i < 7; i++) {
+        const t = -190 + i * 60 + rand() * 20;
+        if (rand() > 0.35) car(w, c + (rand() > 0.5 ? 5 : -5), t, false, carColors[i % carColors.length]);
+        if (rand() > 0.35) car(w, t + 30, c + (rand() > 0.5 ? 5 : -5), true, carColors[(i + 2) % carColors.length]);
+      }
+      for (let i = -4; i <= 4; i++) {
+        streetLamp(w, c + 11, i * 50 + 25);
+        streetLamp(w, i * 50, c - 11);
+      }
+      // jersey barricades at intersections
+      for (const d of [-150, -50, 50, 150]) {
+        if (rand() > 0.5) w.box(c, 0, d + 14, 10, 3, 1.4, M.concrete);
+        else w.box(c + 14, 0, d, 1.4, 3, 10, M.concrete);
+      }
+    }
+    w.autoSpawns(rand, 26, 30, 16);
+  },
+};

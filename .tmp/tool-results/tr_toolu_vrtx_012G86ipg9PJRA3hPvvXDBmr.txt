@@ -1,0 +1,373 @@
+stdout:
+/**
+ * this is the main configuration file of your bit workspace.
+ * for full documentation, please see: https://bit.dev/reference/workspace/workspace-json
+ **/{
+  "$schema": "https://static.bit.dev/teambit/schemas/schema.json",
+  /**
+   * main configuration of the Bit workspace.
+   **/
+  "teambit.workspace/workspace": {
+    /**
+     * the name of the component workspace. used for development purposes.
+     **/
+    "name": "cod-inspired-fps",
+    /**
+     * set the icon to be shown on the Bit server.
+     **/
+    "icon": "https://static.bit.dev/brands/bit-logo-min.png",
+    /**
+     * default directory to place a component during `bit import` and `bit create`.
+     * the following placeholders are available:
+     * name - component name includes namespace, e.g. 'ui/button'.
+     * scopeId - full scope-id includes the owner, e.g. 'teambit.compilation'.
+     * scope - scope name only, e.g. 'compilation'.
+     * owner - owner name in bit.dev, e.g. 'teambit'.
+     **/
+    "defaultDirectory": "{scope}/{name}",
+    /**
+     * default scope for all components in workspace.
+     **/
+    "defaultScope": "tuneszkiiii31.cod-inspired-fps",
+    "resolveAspectsFromNodeModules": true,
+    "resolveEnvsFromRoots": true
+  },
+  /**
+  * Enable generator templates by uncommenting the desired environments below.
+  * These generators scaffold components for Node, React, Vue, and Angular.
+  * After uncommenting, run `bit install` to make them available in your workspace.
+  * Explore more dev environments at: https://bit.dev/docs/getting-started/composing/dev-environments
+  **/
+  "teambit.generator/generator": {
+    "envs": [
+      // "bitdev.node/node-env",
+      // "bitdev.react/react-env",
+      // "bitdev.vue/vue-env",
+      // "bitdev.angular/angular-env"
+      // "bitdev.symphony/envs/symphony-env"
+    ]
+  },
+  /**
+   * main configuration for component dependency resolution.
+   **/
+  "teambit.dependencies/dependency-resolver": {
+    /**
+     * Configure which dependencies are allowed to run install scripts.
+     * By default, no dependencies can run scripts. Set to true to allow, false to explicitly disallow.
+     * Example: { "esbuild": true, "core-js": false }
+     * See also: dangerouslyAllowAllScripts to allow all scripts (not recommended).
+     * This is a security-sensitive setting: enabling scripts may allow arbitrary code execution during install.
+     **/
+    "allowScripts": {},
+    "rootComponents": true,
+    "policy": {
+      "dependencies": {
+        "@bitdev/react.app-types.vite-react": "^3.0.17",
+        "@types/three": "^0.186.0",
+        "three": "^0.186.1"
+      },
+      "peerDependencies": {}
+    },
+    "linkCoreAspects": true,
+    "packageManager": "teambit.dependencies/pnpm"
+  },
+  "teambit.workspace/workspace-config-files": {
+    "enableWorkspaceConfigWrite": true
+  }
+}
+/**
+ * this is the main configuration file of your bit workspace.
+ * for full documentation, please see: https://bit.dev/reference/workspace/workspace-json
+ **/{
+  "$schema": "https://static.bit.dev/teambit/schemas/schema.json",
+  /**
+   * main configuration of the Bit workspace.
+   **/
+  "teambit.workspace/workspace": {
+    /**
+     * the name of the component workspace. used for development purposes.
+     **/
+    "name": "cod-inspired-fps",
+    /**
+     * set the icon to be shown on the Bit server.
+     **/
+    "icon": "https://static.bit.dev/brands/bit-logo-min.png",
+    /**
+     * default directory to place a component during `bit import` and `bit create`.
+     * the following placeholders are available:
+     * name - component name includes namespace, e.g. 'ui/button'.
+     * scopeId - full scope-id includes the owner, e.g. 'teambit.compilation'.
+     * scope - scope name only, e.g. 'compilation'.
+     * owner - owner name in bit.dev, e.g. 'teambit'.
+     **/
+    "defaultDirectory": "{scope}/{name}",
+    /**
+     * default scope for all components in workspace.
+     **/
+    "defaultScope": "tuneszkiiii32.cod-inspired-fps",
+    "resolveAspectsFromNodeModules": true,
+    "resolveEnvsFromRoots": true
+  },
+  /**
+  * Enable generator templates by uncommenting the desired environments below.
+  * These generators scaffold components for Node, React, Vue, and Angular.
+  * After uncommenting, run `bit install` to make them available in your workspace.
+  * Explore more dev environments at: https://bit.dev/docs/getting-started/composing/dev-environments
+  **/
+  "teambit.generator/generator": {
+    "envs": [
+      // "bitdev.node/node-env",
+      // "bitdev.react/react-env",
+      // "bitdev.vue/vue-env",
+      // "bitdev.angular/angular-env"
+      // "bitdev.symphony/envs/symphony-env"
+    ]
+  },
+  /**
+   * main configuration for component dependency resolution.
+   **/
+  "teambit.dependencies/dependency-resolver": {
+    /**
+     * Configure which dependencies are allowed to run install scripts.
+     * By default, no dependencies can run scripts. Set to true to allow, false to explicitly disallow.
+     * Example: { "esbuild": true, "core-js": false }
+     * See also: dangerouslyAllowAllScripts to allow all scripts (not recommended).
+     * This is a security-sensitive setting: enabling scripts may allow arbitrary code execution during install.
+     **/
+    "allowScripts": {},
+    "rootComponents": true,
+    "policy": {
+      "dependencies": {},
+      "peerDependencies": {}
+    }
+  },
+  "teambit.workspace/workspace-config-files": {
+    "enableWorkspaceConfigWrite": true
+  }
+}
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { DefaultLoadout, DefaultSettings, Weapons, type GameSettings, type Loadout } from './game/config.js';
+import { DefaultCosmetics, Reticles, findCosmetic, type Cosmetics } from './game/cosmetics.js';
+import { usePersistedState } from './use-persisted-state.js';
+import type { Game } from './game/game.js';
+import type { HudState } from './game/hud-state.js';
+import { Hud } from './ui/hud.js';
+import { MainMenu } from './ui/main-menu.js';
+import { TouchControls } from './ui/touch-controls.js';
+import styles from './warzone-web.module.css';
+
+type Phase = 'menu' | 'playing' | 'paused';
+
+/**
+ * Root of the browser port of the Roblox CoD MW2019-style FPS.
+ * Owns the menu / pause flow and mounts the Three.js game (loaded lazily so SSR stays safe).
+ * @returns the app
+ */
+export function WarzoneWeb() {
+  const host = useRef<HTMLDivElement>(null);
+  const game = useRef<Game | null>(null);
+  const [phase, setPhase] = useState<Phase>('menu');
+  const [hud, setHud] = useState<HudState | null>(null);
+  const [savedLoadout, setLoadout] = usePersistedState<Loadout>('wzw.loadout', DefaultLoadout);
+  // guard against stale saves that reference weapons that no longer exist
+  const loadout = Weapons[savedLoadout.primary] && Weapons[savedLoadout.secondary] ? savedLoadout : DefaultLoadout;
+  const [settings, setSettings] = usePersistedState<GameSettings>('wzw.settings', DefaultSettings);
+  const [cosmetics, setCosmetics] = usePersistedState<Cosmetics>('wzw.cosmetics', DefaultCosmetics);
+  const reticleColor = findCosmetic(Reticles, cosmetics.reticle).color;
+  const [touch, setTouch] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** Preloaded game module, so Deploy runs inside the click gesture (needed for pointer lock). */
+  const gameModule = useRef<Promise<typeof import('./game/game.js')> | null>(null);
+
+  useEffect(() => {
+    gameModule.current = import('./game/game.js');
+    import('./game/input.js').then((m) => setTouch(m.isTouchDevice())).catch(() => undefined);
+  }, []);
+
+  const quit = useCallback(() => {
+    game.current?.dispose();
+    game.current = null;
+    setHud(null);
+    setPhase('menu');
+  }, []);
+
+  useEffect(() => () => game.current?.dispose(), []);
+  useEffect(() => game.current?.applySettings(settings), [settings]);
+
+  const deploy = async () => {
+    setError(null);
+    if (game.current) {
+      game.current.resume();
+      setPhase('playing');
+      return;
+    }
+    try {
+      const { Game: GameClass } = await (gameModule.current ?? import('./game/game.js'));
+      if (!host.current) return;
+      const g = new GameClass(host.current, loadout, settings, setHud, (paused) => setPhase(paused ? 'paused' : 'playing'), cosmetics);
+      game.current = g;
+      g.start();
+      setPhase('playing');
+    } catch (e) {
+      game.current?.dispose();
+      game.current = null;
+      setError(e instanceof Error ? e.message : 'Could not start the game on this device.');
+    }
+  };
+
+  const pause = useCallback(() => {
+    game.current?.pause();
+  }, []);
+
+  return (
+    <div className={styles.root}>
+      <div ref={host} className={styles.canvas} />
+      {hud && phase !== 'menu' && <Hud s={hud} reticleColor={reticleColor} showFps={settings.graphics.showFps} />}
+      {touch && phase === 'playing' && game.current && <TouchControls input={game.current.controls} onPause={pause} canPickup={!!hud?.pickupPrompt} knifeHeld={hud?.weaponClass === 'Melee'} hasStreak={!!hud?.streaks.length} />}
+      {phase === 'menu' && (
+        <MainMenu
+          loadout={loadout}
+          settings={settings}
+          cosmetics={cosmetics}
+          onLoadout={setLoadout}
+          onSettings={setSettings}
+          onCosmetics={setCosmetics}
+          onDeploy={deploy}
+          error={error}
+        />
+      )}
+      {phase === 'paused' && (
+        <MainMenu
+          loadout={loadout}
+          settings={settings}
+          cosmetics={cosmetics}
+          onLoadout={setLoadout}
+          onSettings={setSettings}
+          onCosmetics={setCosmetics}
+          onDeploy={deploy}
+          deployLabel="RESUME"
+          onQuit={quit}
+        />
+      )}
+    </div>
+  );
+}
+import { useEffect, useState } from 'react';
+import type { GameSettings, Loadout } from '../game/config.js';
+import type { Cosmetics } from '../game/cosmetics.js';
+import lobbyBg from '../assets/lobby-bg.png';
+import { ArmoryTab } from './armory-tab.js';
+import { CosmeticsTab } from './cosmetics-tab.js';
+import { DeployTab } from './deploy-tab.js';
+import { PlayerCard } from './player-card.js';
+import { SettingsTab } from './settings-tab.js';
+import styles from './menu.module.css';
+
+/** Menu tabs, in top-bar order. */
+export type MenuTab = 'deploy' | 'armory' | 'cosmetics' | 'settings';
+
+const TABS: { id: MenuTab; label: string; key: string }[] = [
+  { id: 'deploy', label: 'DEPLOY', key: '1' },
+  { id: 'armory', label: 'ARMORY', key: '2' },
+  { id: 'cosmetics', label: 'COSMETICS', key: '3' },
+  { id: 'settings', label: 'SETTINGS', key: '4' },
+];
+
+/** Props for {@link MainMenu}. */
+export interface MainMenuProps {
+  loadout: Loadout;
+  settings: GameSettings;
+  cosmetics: Cosmetics;
+  onLoadout: (l: Loadout) => void;
+  onSettings: (s: GameSettings) => void;
+  onCosmetics: (c: Cosmetics) => void;
+  onDeploy: () => void;
+  /** Label for the main button ("DEPLOY" or "RESUME"). */
+  deployLabel?: string;
+  /** Shown while paused: lets the player quit back to the menu. */
+  onQuit?: () => void;
+  /** Error message shown above the deploy button (e.g. WebGL unavailable). */
+  error?: string | null;
+  /** Tab to open first. */
+  initialTab?: MenuTab;
+}
+
+/**
+ * Warzone-style main / pause menu with Deploy, Armory, Cosmetics and Settings tabs.
+ * Keys 1–4 (or Q / E) switch tabs.
+ * @param props menu props
+ * @returns menu screen
+ */
+export function MainMenu({
+  loadout, settings, cosmetics, onLoadout, onSettings, onCosmetics, onDeploy, deployLabel = 'DEPLOY', onQuit, error, initialTab = 'deploy',
+}: MainMenuProps) {
+  const [tab, setTab] = useState<MenuTab>(initialTab);
+  const paused = !!onQuit;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
+      const idx = TABS.findIndex((t) => t.id === tab);
+      const byKey = TABS.find((t) => t.key === e.key);
+      if (byKey) setTab(byKey.id);
+      else if (e.key === 'q' || e.key === 'Q') setTab(TABS[(idx + TABS.length - 1) % TABS.length].id);
+      else if (e.key === 'e' || e.key === 'E') setTab(TABS[(idx + 1) % TABS.length].id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tab]);
+
+  return (
+    <div className={styles.menu} style={{ ['--bg' as string]: `url(${lobbyBg})` }}>
+      <div className={styles.backdrop} aria-hidden />
+      <div className={styles.inner}>
+        <header className={styles.topbar}>
+          <div className={styles.brand}>
+            <span className={styles.kicker}>{paused ? 'MATCH IN PROGRESS' : 'MODERN WARFARE · WEB'}</span>
+            <span className={styles.title}>
+              WARZONE<span>.WEB</span>
+            </span>
+          </div>
+          <nav className={styles.tabs} role="tablist">
+            <span className={styles.tabKey} aria-hidden>Q</span>
+            {TABS.map((t) => (
+              <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? styles.tabActive : styles.tab} onClick={() => setTab(t.id)}>
+                {t.label}
+              </button>
+            ))}
+            <span className={styles.tabKey} aria-hidden>E</span>
+          </nav>
+          <PlayerCard cosmetics={cosmetics} />
+        </header>
+
+        <main className={styles.content} key={tab}>
+          {tab === 'deploy' && (
+            <DeployTab loadout={loadout} settings={settings} cosmetics={cosmetics} onSettings={onSettings} onEditLoadout={() => setTab('armory')} />
+          )}
+          {tab === 'armory' && <ArmoryTab loadout={loadout} onLoadout={onLoadout} />}
+          {tab === 'cosmetics' && <CosmeticsTab cosmetics={cosmetics} onCosmetics={onCosmetics} />}
+          {tab === 'settings' && <SettingsTab settings={settings} onSettings={onSettings} />}
+        </main>
+
+        <footer className={styles.footer}>
+          {error && (
+            <div role="alert" className={styles.error}>
+              {error}
+            </div>
+          )}
+          <div className={styles.footerActions}>
+            {onQuit && (
+              <button className={styles.secondary} onClick={onQuit}>
+                QUIT MATCH
+              </button>
+            )}
+            <button className={styles.deploy} onClick={onDeploy}>
+              <span className={styles.deployLabel}>{deployLabel}</span>
+              <span className={styles.deploySub}>{paused ? 'BACK TO THE FIGHT' : `${settings.botCount} HOSTILES · ${loadout.primary}`}</span>
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,1 @@
+[{"name":"","description":"Finds a map by id, falling back to the first map.","args":[{"description":"map id","type":null,"name":"id"}],"returns":{"description":"map definition","type":null},"access":"public","examples":[],"render":"","properties":[],"static":false,"filePath":"game/maps/index.ts"}]
